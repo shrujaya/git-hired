@@ -1,0 +1,7 @@
+livekit-agents
+livekit-plugins-anthropic
+livekit-plugins-noise-cancellation
+requests
+python-dotenv
+pydantic-ai-slim[claude,mcp]
+livekit-agents[tavus]~=1.0
