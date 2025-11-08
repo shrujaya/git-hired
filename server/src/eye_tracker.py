@@ -54,20 +54,40 @@ while True:
         break
 
     h, w, _ = frame.shape
+    margin_x = int(0.20 * w)
+    safe_zone = ((margin_x, 0), (w - margin_x, h))
+    cv2.rectangle(frame, safe_zone[0], safe_zone[1], (0, 255, 0), 2)
 
     # Convert to RGB for MediaPipe
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb_frame)
 
     eyes_detected = False
+    face_detected = False
 
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
+            
+            # Get face center from landmark 1 (usually the tip of the nose)
+            face_center = face_landmarks.landmark[1]
+            cx, cy = int(face_center.x * w), int(face_center.y * h)
+
+            if margin_x < cx < (w - margin_x) and 0 < cy < h:
+                face_in_center = True
+                cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+            else:
+                face_in_center = False
+                cv2.circle(frame, (cx, cy), 7, (0, 0, 255), -1)
+                cv2.putText(frame, "Center Yourself!", (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+
             left_eye_points = [(int(face_landmarks.landmark[i].x * w), int(face_landmarks.landmark[i].y * h)) for i in LEFT_EYE_INDICES]
             right_eye_points = [(int(face_landmarks.landmark[i].x * w), int(face_landmarks.landmark[i].y * h)) for i in RIGHT_EYE_INDICES]
             # Draw bounding boxes around the eyes
             if len(left_eye_points) == 2 and len(right_eye_points) == 2:
                 eyes_detected = True
+                
                 # Left eye rectangle
                 left_xs, left_ys = zip(*left_eye_points)
                 cv2.rectangle(frame, (min(left_xs)-15, min(left_ys)-15), (max(left_xs)+15, max(left_ys)+15), (255, 0, 0), 2)

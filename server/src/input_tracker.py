@@ -44,6 +44,9 @@ def on_click(x, y, button, pressed):
     action = "Pressed" if pressed else "Released"
     write_log("Mouse Click", f"{button} at ({x}, {y}) - {action}" , log_file_mouse)
 
+def on_move(x, y):
+    write_log("Mouse Move", f"Moved to ({x}, {y})" , log_file_mouse)
+
 def on_scroll(x, y, dx, dy):
     direction = "down" if dy < 0 else "up"
     write_log("Mouse Scroll", f"Scrolled {direction} at ({x}, {y})" , log_file_mouse)
@@ -51,7 +54,7 @@ def on_scroll(x, y, dx, dy):
 
 # Setting up listeners for keyboard and mouse
 keyboard_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
-mouse_listener = mouse.Listener(on_click=on_click, on_scroll=on_scroll)
+mouse_listener = mouse.Listener(on_click=on_click, on_scroll=on_scroll , on_move=on_move)
 
 if __name__ == "__main__":
     try:
@@ -60,7 +63,7 @@ if __name__ == "__main__":
 
         print("Tracking input events... Press Ctrl + C to stop.")
         while True:
-            time.sleep(0.1) 
+            time.sleep(1) 
     except KeyboardInterrupt:
         print("\nStopped logging by user.")
         keyboard_listener.stop()
