@@ -1,31 +1,49 @@
 // src/routes/index.tsx
 import { createBrowserRouter } from "react-router-dom";
-import DeviceCheckPageSimple from "../pages/DeviceCheckPageSimple";
 import LandingPage from "../pages/LandingPage";
 import InterviewPage from "../pages/InterviewPage";
 import ResultsPage from "../pages/ResultsPage";
-import Test from "../pages/test";
+import Test from "../pages/Test";
+import AiInterview from "../pages/AiInterview";
+import {
+  ProtectTestPage,
+  ProtectLandingPage,
+  ProtectInterviewPage,
+  ProtectResultsPage,
+} from "../components/ProtectedRoute";
 
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <DeviceCheckPageSimple />,
+    element: (
+      <ProtectTestPage>
+        <Test />
+      </ProtectTestPage>
+    ),
   },
   {
     path: "/landing",
-    element: <LandingPage />,
+    element: (
+      <ProtectLandingPage>
+        <LandingPage />
+      </ProtectLandingPage>
+    ),
   },
   {
     path: "/interview",
-    element: <InterviewPage />,
+    element: (
+      <ProtectInterviewPage>
+        <InterviewPage />
+      </ProtectInterviewPage>
+    ),
   },
   {
-    path: "/results/:sessionId",
-    element: <ResultsPage />,
-  },
-  {
-    path: "/test",
-    element: <Test />,
+    path: "/results",
+    element: (
+      <ProtectResultsPage>
+        <ResultsPage />
+      </ProtectResultsPage>
+    ),
   },
   {
     path: "*",

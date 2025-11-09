@@ -1,5 +1,6 @@
 eyetracking.py
 .env
 __pycache__/
-files/
+server/files/*.pdf
 .DS_Store
+logs/

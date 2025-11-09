@@ -1,0 +1,16 @@
+================================================================================
+INTERVIEW TRANSCRIPT
+================================================================================
+
+
+[2025-11-09T03:31:02.501954] OPENING
+Interviewer: Hi! I've reviewed your resume and I'm excited to chat with you today. I can see you have some really interesting experience with iOS development, AI/ML projects, and that impressive LLM benchmarking work you published. 
+
+I'll be asking you technical questions to understand your experience and problem-solving approach. There are no trick questions here - I'm genuinely interested in how you think through problems. Feel free to take your time with answers and ask for clarification if anything isn't clear.
+
+Let's start with something from your recent experience. I noticed you built a hospital management iOS app that integrates with the Gemini API for specialist suggestions. That sounds like a really practical application! 
+
+Can you walk me through the architecture of that app and specifically how you handled the integration with the Gemini API? I'm curious about how you structured the API calls and managed the responses.
+
+[2025-11-09T03:32:20.431171] CLOSING
+Interviewer: Thank you for your time today. You did well and showed good problem-solving skills. We'll review your interview and get back to you soon. Do you have any questions for me?
