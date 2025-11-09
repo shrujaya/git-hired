@@ -24,10 +24,11 @@ face_mesh = mp_face_mesh.FaceMesh(
 )
 
 # Log file setup
-log_dir = "./server/src/logs"
+log_dir = "./src/logs"
 os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, "eye_tracking_log.jsonl")
 
+log_file = os.path.join(log_dir, "eye_tracking_log.jsonl")
+print(log_file)
 
 def write_log(event_type, duration=None):
     log_entry = {
