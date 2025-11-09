@@ -3,3 +3,4 @@ eyetracking.py
 __pycache__/
 server/files/*.pdf
 .DS_Store
+logs/
