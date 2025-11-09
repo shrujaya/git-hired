@@ -128,6 +128,9 @@ function LandingPage() {
       localStorage.setItem("resumeFileName", selectedFile!.name);
       localStorage.setItem("selectedJobType", selectedJobType);
       localStorage.setItem("jobTitle", selectedJob!.title);
+      sessionStorage.setItem("resumeFileName", selectedFile!.name);
+      sessionStorage.setItem("selectedJobType", selectedJobType);
+      sessionStorage.setItem("jobTitle", selectedJob!.title);
       navigate("/interview");
     }
   };
