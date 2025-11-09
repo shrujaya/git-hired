@@ -7,6 +7,7 @@ from fastapi import FastAPI,WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from routes.example import router as example_router
 from routes.videos import router as ws_video_router
+from routes.code_evaluator import router as code_evaluation_router
 import numpy as np 
 import cv2
 from datetime import datetime
@@ -31,3 +32,5 @@ app.include_router(ws_video_router)
 
 # Register the router properly
 app.include_router(example_router)
+
+app.include_router(code_evaluation_router)

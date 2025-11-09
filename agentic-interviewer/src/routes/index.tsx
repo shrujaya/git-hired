@@ -4,7 +4,7 @@ import DeviceCheckPageSimple from "../pages/DeviceCheckPageSimple";
 import LandingPage from "../pages/LandingPage";
 import InterviewPage from "../pages/InterviewPage";
 import ResultsPage from "../pages/ResultsPage";
-import Test from "../pages/Test";
+import CameraCheck from "../pages/Test";
 
 export const router = createBrowserRouter([
   {
@@ -25,7 +25,7 @@ export const router = createBrowserRouter([
   },
   {
     path: "/test",
-    element: <Test />,
+    element: <CameraCheck />,
   },
   {
     path: "*",
