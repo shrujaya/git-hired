@@ -1,4 +1,4 @@
-// src/pages/LandingPage.tsx
+// src/pages/LandingPage.tsx - COMPACT VERSION
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -131,7 +131,7 @@ function LandingPage() {
     setError("");
   };
 
-const handleProceed = async () => {
+  const handleProceed = async () => {
     if (!canProceed) return;
 
     setIsLoading(true);
@@ -181,62 +181,62 @@ const handleProceed = async () => {
         <div className="absolute -bottom-8 left-1/2 w-72 h-72 bg-teal-400/20 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
       </div>
 
-      {/* Header - Compact */}
+      {/* Header - More Compact */}
       <header className="relative z-10 bg-white/80 backdrop-blur-md border-b border-blue-100 shadow-sm flex-shrink-0">
-        <div className="max-w-7xl mx-auto px-6 py-3">
+        <div className="max-w-7xl mx-auto px-6 py-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Sparkles className="w-5 h-5 text-white" />
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-xl flex items-center justify-center shadow-lg">
+                <Sparkles className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                <h1 className="text-base font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                   AI Tech Interviewer
                 </h1>
-                <p className="text-xs text-gray-600 flex items-center gap-1">
-                  <Zap className="w-3 h-3 text-yellow-500" />
+                <p className="text-[10px] text-gray-600 flex items-center gap-1">
+                  <Zap className="w-2.5 h-2.5 text-yellow-500" />
                   Powered by Claude AI
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 bg-green-50 px-3 py-1.5 rounded-full border border-green-200">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50" />
-              <span className="text-sm font-medium text-green-700">System Ready</span>
+            <div className="flex items-center gap-2 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50" />
+              <span className="text-xs font-medium text-green-700">System Ready</span>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main content area - Compact, no scroll */}
-      <main className="relative z-10 flex-1 flex items-center justify-center px-6 py-4 overflow-hidden">
+      {/* Main content area - Super Compact */}
+      <main className="relative z-10 flex-1 flex items-center justify-center px-4 py-2 overflow-hidden">
         <div className="w-full max-w-7xl">
-          {/* Hero Section - Compact */}
-          <div className="text-center mb-4">
-            <div className="inline-flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-semibold mb-2">
-              <Target className="w-3 h-3" />
-              Git Hired Faster with AI
+          {/* Hero Section - Ultra Compact */}
+          <div className="text-center mb-2.5">
+            <div className="inline-flex items-center gap-1.5 bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full text-[10px] font-semibold mb-1.5">
+              <Target className="w-2.5 h-2.5" />
+              Get Hired Faster with AI
             </div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-1.5 leading-tight">
+            <h2 className="text-2xl font-bold text-gray-900 mb-1 leading-tight">
               Welcome to Your <span className="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">AI Interview</span>
             </h2>
-            <p className="text-sm text-gray-600">
+            <p className="text-xs text-gray-600">
               Upload your resume and select your dream position to start your personalized AI-powered interview
             </p>
           </div>
 
-          {/* Main Grid - Compact */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          {/* Main Grid - More Compact */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-2.5">
             {/* Left Column */}
-            <div className="space-y-4">
+            <div className="space-y-2.5">
               {/* Resume Upload Card - Compact */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-4 shadow-xl hover:shadow-2xl transition-all duration-300">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg">
-                    <FileText className="w-5 h-5 text-white" />
+              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl hover:shadow-2xl transition-all duration-300">
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg">
+                    <FileText className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-gray-900">Upload Your Resume</h3>
-                    <p className="text-xs text-gray-500">PDF format, maximum 10MB</p>
+                    <h3 className="text-sm font-bold text-gray-900">Upload Your Resume</h3>
+                    <p className="text-[10px] text-gray-500">PDF format, maximum 10MB</p>
                   </div>
                 </div>
 
@@ -245,7 +245,7 @@ const handleProceed = async () => {
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer group ${
+                    className={`relative border-2 border-dashed rounded-lg p-4 text-center transition-all cursor-pointer group ${
                       isDragging 
                         ? "border-blue-500 bg-blue-50 scale-105" 
                         : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50"
@@ -259,47 +259,47 @@ const handleProceed = async () => {
                       className="hidden" 
                     />
                     <label htmlFor="resume-upload" className="cursor-pointer">
-                      <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
-                        <Upload className="w-6 h-6 text-blue-600" />
+                      <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl flex items-center justify-center mx-auto mb-1.5 group-hover:scale-110 transition-transform">
+                        <Upload className="w-5 h-5 text-blue-600" />
                       </div>
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">
+                      <p className="text-xs font-semibold text-gray-900 mb-0.5">
                         Drop your resume here
                       </p>
-                      <p className="text-xs text-gray-500 mb-3">
+                      <p className="text-[10px] text-gray-500 mb-2">
                         or click to browse files
                       </p>
-                      <div className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all">
-                        <Upload className="w-4 h-4" />
+                      <div className="inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all">
+                        <Upload className="w-3.5 h-3.5" />
                         Choose File
                       </div>
                     </label>
                   </div>
                 ) : (
-                  <div className="relative bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-lg p-3 shadow-md">
+                  <div className="relative bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-lg p-2.5 shadow-md">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg flex items-center justify-center shadow-lg flex-shrink-0">
-                          <FileText className="w-5 h-5 text-white" />
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg flex items-center justify-center shadow-lg flex-shrink-0">
+                          <FileText className="w-4 h-4 text-white" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-gray-900 truncate">
+                          <p className="text-xs font-semibold text-gray-900 truncate">
                             {selectedFile.name}
                           </p>
-                          <p className="text-xs text-gray-600">
+                          <p className="text-[10px] text-gray-600">
                             {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="flex items-center gap-1 bg-green-100 px-2 py-1 rounded-lg">
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <div className="flex items-center gap-1 bg-green-100 px-1.5 py-0.5 rounded-lg">
                           <CheckCircle className="w-3 h-3 text-green-600" />
-                          <span className="text-xs font-medium text-green-700">Uploaded</span>
+                          <span className="text-[10px] font-medium text-green-700">Uploaded</span>
                         </div>
                         <button 
                           onClick={removeFile} 
-                          className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -307,31 +307,31 @@ const handleProceed = async () => {
                 )}
 
                 {error && (
-                  <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-2 flex items-center gap-2">
-                    <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
-                      <X className="w-2.5 h-2.5 text-white" />
+                  <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-1.5 flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
+                      <X className="w-2 h-2 text-white" />
                     </div>
-                    <p className="text-xs text-red-700 font-medium">{error}</p>
+                    <p className="text-[10px] text-red-700 font-medium">{error}</p>
                   </div>
                 )}
               </div>
 
               {/* Job Selection Card - Compact */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-4 shadow-xl hover:shadow-2xl transition-all duration-300">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-                    <Briefcase className="w-5 h-5 text-white" />
+              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl hover:shadow-2xl transition-all duration-300">
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
+                    <Briefcase className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-gray-900">Select Your Position</h3>
-                    <p className="text-xs text-gray-500">Choose the role you're applying for</p>
+                    <h3 className="text-sm font-bold text-gray-900">Select Your Position</h3>
+                    <p className="text-[10px] text-gray-500">Choose the role you're applying for</p>
                   </div>
                 </div>
 
                 <select
                   value={selectedJobType}
                   onChange={(e) => setSelectedJobType(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-lg text-sm font-medium text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all cursor-pointer hover:border-blue-300"
+                  className="w-full px-2.5 py-2 bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-lg text-xs font-medium text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all cursor-pointer hover:border-blue-300"
                 >
                   <option value="">Select a position...</option>
                   {JOB_TYPES.map((j) => (
@@ -342,13 +342,13 @@ const handleProceed = async () => {
                 </select>
 
                 {selectedJobType && (
-                  <div className="mt-3 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 px-3 py-2 rounded-lg flex items-center gap-2">
-                    <div className="w-6 h-6 bg-green-500 rounded-lg flex items-center justify-center shadow-md">
-                      <CheckCircle className="w-4 h-4 text-white" />
+                  <div className="mt-2 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 px-2.5 py-1.5 rounded-lg flex items-center gap-2">
+                    <div className="w-5 h-5 bg-green-500 rounded-lg flex items-center justify-center shadow-md">
+                      <CheckCircle className="w-3.5 h-3.5 text-white" />
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-green-700">Position Selected</p>
-                      <p className="text-xs text-green-600">{selectedJob?.title}</p>
+                      <p className="text-[10px] font-semibold text-green-700">Position Selected</p>
+                      <p className="text-[10px] text-green-600">{selectedJob?.title}</p>
                     </div>
                   </div>
                 )}
@@ -356,45 +356,45 @@ const handleProceed = async () => {
             </div>
 
             {/* Right Column - Job Description - Compact */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-4 shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col">
+            <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col">
               {selectedJob ? (
                 <div className="flex flex-col h-full">
                   {/* Job Header */}
-                  <div className="flex items-start gap-3 pb-3 border-b border-blue-100">
-                    <div className={`w-12 h-12 bg-gradient-to-br ${selectedJob.color} rounded-xl flex items-center justify-center shadow-lg flex-shrink-0`}>
-                      <selectedJob.icon className="w-6 h-6 text-white" />
+                  <div className="flex items-start gap-2.5 pb-2 border-b border-blue-100">
+                    <div className={`w-10 h-10 bg-gradient-to-br ${selectedJob.color} rounded-xl flex items-center justify-center shadow-lg flex-shrink-0`}>
+                      <selectedJob.icon className="w-5 h-5 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-bold text-gray-900 mb-1 leading-tight">
+                      <h3 className="text-base font-bold text-gray-900 mb-0.5 leading-tight">
                         {selectedJob.title}
                       </h3>
-                      <div className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold">
-                        <Zap className="w-3 h-3" />
+                      <div className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-semibold">
+                        <Zap className="w-2.5 h-2.5" />
                         {selectedJob.level}
                       </div>
                     </div>
                   </div>
 
                   {/* Description - Line clamp */}
-                  <div className="mt-3 mb-3">
-                    <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wide mb-1.5">
+                  <div className="mt-2 mb-2">
+                    <h4 className="text-[10px] font-bold text-gray-900 uppercase tracking-wide mb-1">
                       Role Overview
                     </h4>
-                    <p className="text-sm text-gray-700 leading-relaxed line-clamp-2">
+                    <p className="text-xs text-gray-700 leading-relaxed line-clamp-2">
                       {selectedJob.description}
                     </p>
                   </div>
 
                   {/* Skills */}
-                  <div className="mb-3">
-                    <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wide mb-1.5">
+                  <div className="mb-2">
+                    <h4 className="text-[10px] font-bold text-gray-900 uppercase tracking-wide mb-1">
                       Required Skills
                     </h4>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1">
                       {selectedJob.skills.map((skill) => (
                         <span 
                           key={skill} 
-                          className="bg-gradient-to-r from-blue-100 to-cyan-100 text-blue-700 px-3 py-1 rounded-lg text-xs font-semibold border border-blue-200"
+                          className="bg-gradient-to-r from-blue-100 to-cyan-100 text-blue-700 px-2 py-0.5 rounded-lg text-[10px] font-semibold border border-blue-200"
                         >
                           {skill}
                         </span>
@@ -403,25 +403,25 @@ const handleProceed = async () => {
                   </div>
 
                   {/* Interview Focus */}
-                  <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-3 rounded-lg border border-blue-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-6 h-6 bg-blue-600 rounded-lg flex items-center justify-center">
-                        <Target className="w-3 h-3 text-white" />
+                  <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-2 rounded-lg border border-blue-200">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <div className="w-5 h-5 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <Target className="w-2.5 h-2.5 text-white" />
                       </div>
-                      <h4 className="text-xs font-bold text-gray-900">Interview Focus</h4>
+                      <h4 className="text-[10px] font-bold text-gray-900">Interview Focus</h4>
                     </div>
-                    <ul className="space-y-1.5">
-                      <li className="flex items-start gap-2">
-                        <CheckCircle className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-xs text-gray-700">Technical questions tailored to your resume</span>
+                    <ul className="space-y-1">
+                      <li className="flex items-start gap-1.5">
+                        <CheckCircle className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
+                        <span className="text-[10px] text-gray-700">Technical questions tailored to your resume</span>
                       </li>
-                      <li className="flex items-start gap-2">
-                        <CheckCircle className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-xs text-gray-700">Role-specific coding challenges</span>
+                      <li className="flex items-start gap-1.5">
+                        <CheckCircle className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
+                        <span className="text-[10px] text-gray-700">Role-specific coding challenges</span>
                       </li>
-                      <li className="flex items-start gap-2">
-                        <CheckCircle className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-xs text-gray-700">Real-world problem-solving scenarios</span>
+                      <li className="flex items-start gap-1.5">
+                        <CheckCircle className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
+                        <span className="text-[10px] text-gray-700">Real-world problem-solving scenarios</span>
                       </li>
                     </ul>
                   </div>
@@ -429,13 +429,13 @@ const handleProceed = async () => {
               ) : (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="text-center">
-                    <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl flex items-center justify-center mx-auto mb-3">
-                      <Briefcase className="w-8 h-8 text-blue-600" />
+                    <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl flex items-center justify-center mx-auto mb-2">
+                      <Briefcase className="w-7 h-7 text-blue-600" />
                     </div>
-                    <h3 className="text-base font-bold text-gray-900 mb-1">
+                    <h3 className="text-sm font-bold text-gray-900 mb-0.5">
                       Select a Position
                     </h3>
-                    <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                    <p className="text-[10px] text-gray-500 max-w-xs mx-auto">
                       Choose your desired role from the dropdown to view detailed job requirements
                     </p>
                   </div>
@@ -445,11 +445,11 @@ const handleProceed = async () => {
           </div>
 
           {/* CTA Button - Compact */}
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex flex-col items-center gap-1.5">
             <button
               onClick={handleProceed}
               disabled={!canProceed || isLoading}
-              className={`group relative px-8 py-3 rounded-xl font-bold text-base transition-all duration-300 ${
+              className={`group relative px-6 py-2.5 rounded-xl font-bold text-sm transition-all duration-300 ${
                 canProceed && !isLoading
                   ? "bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-xl shadow-blue-500/50 hover:shadow-2xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
@@ -458,21 +458,21 @@ const handleProceed = async () => {
               <span className="flex items-center gap-2">
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                     Initializing Interview...
                   </>
                 ) : (
                   <>
                     Start Your AI Interview
-                    <ArrowRight className={`w-5 h-5 ${canProceed ? "group-hover:translate-x-1" : ""} transition-transform`} />
+                    <ArrowRight className={`w-4 h-4 ${canProceed ? "group-hover:translate-x-1" : ""} transition-transform`} />
                   </>
                 )}
               </span>
             </button>
             
             {!canProceed && !isLoading && (
-              <div className="flex items-center gap-2 text-xs text-gray-600 bg-white/60 backdrop-blur-sm px-4 py-1.5 rounded-lg border border-gray-200">
-                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse"></div>
+              <div className="flex items-center gap-1.5 text-[10px] text-gray-600 bg-white/60 backdrop-blur-sm px-3 py-1 rounded-lg border border-gray-200">
+                <div className="w-1 h-1 bg-gray-400 rounded-full animate-pulse"></div>
                 Upload your resume and select a position to continue
               </div>
             )}
