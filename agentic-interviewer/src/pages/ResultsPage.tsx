@@ -30,18 +30,24 @@ function InterviewCompletePage() {
     // Get stored data
     const storedName = localStorage.getItem('candidateName') || 'Candidate'
     const storedJob = localStorage.getItem('jobTitle') || 'Position'
-    const startTime = localStorage.getItem('interviewStartTime')
+    const startTime = sessionStorage.getItem('sessionStart');
     
     setUserName(storedName)
     setJobTitle(storedJob)
 
     // Calculate time elapsed
-    if (startTime) {
-      const elapsed = Date.now() - parseInt(startTime)
-      const minutes = Math.floor(elapsed / 60000)
-      const seconds = Math.floor((elapsed % 60000) / 1000)
-      setTimeElapsed(`${minutes}:${seconds.toString().padStart(2, '0')}`)
-    }
+  if (startTime) {
+    const update = () => {
+      const elapsed = Date.now() - parseInt(startTime, 10);
+      const minutes = Math.floor(elapsed / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+      setTimeElapsed(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+    };
+
+    update(); // immediate
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }
 
     // Hide confetti after animation
     setTimeout(() => setShowConfetti(false), 3000)

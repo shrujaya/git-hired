@@ -209,7 +209,9 @@ const CameraCheck: React.FC = () => {
       audioContextRef.current.close();
     }
     sessionStorage.setItem('cameraCheckCompleted', 'true');
-    const sessionExpiry = Date.now() + (60 * 60 * 1000); // 1 hour
+    const startTimestamp = Date.now();
+    const sessionExpiry = startTimestamp + (60 * 60 * 1000); // 1 hour
+    sessionStorage.setItem('sessionStart', startTimestamp.toString());
     sessionStorage.setItem('sessionExpiry', sessionExpiry.toString());
     navigate("/landing");
   };

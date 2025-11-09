@@ -191,7 +191,7 @@ function LandingPage() {
               </div>
               <div>
                 <h1 className="text-base font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                  AI Tech Interviewer
+                  Git Hired
                 </h1>
                 <p className="text-[10px] text-gray-600 flex items-center gap-1">
                   <Zap className="w-2.5 h-2.5 text-yellow-500" />
