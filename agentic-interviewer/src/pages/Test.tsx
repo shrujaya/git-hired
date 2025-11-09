@@ -192,7 +192,6 @@ const CameraCheck: React.FC = () => {
 
   useEffect(() => {
     let interval: number;
-    let interval: number;
     if (isStreaming) {
       interval = setInterval(captureAndSendFrame, 500);
     }
