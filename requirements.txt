@@ -1,2 +1,12 @@
 anthropic
 python-dotenv
+numpy
+fastapi
+uvicorn
+pydantic
+requests
+json
+mediapipe
+opencv-python
+pynput
+base64
