@@ -7,6 +7,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # Base paths
 BASE_DIR = Path(__file__).parent.parent
 LOGS_DIR = BASE_DIR / "logs"
