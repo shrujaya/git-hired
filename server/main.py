@@ -13,7 +13,11 @@ from datetime import datetime
 import mediapipe as mp
 
 
-app = FastAPI()
+app = FastAPI(
+    title="Agentic Interview API",
+    version="0.1.0",
+    description="FastAPI app for your interview system — Swagger UI at /docs"
+)
 
 app.add_middleware(
     CORSMiddleware,
