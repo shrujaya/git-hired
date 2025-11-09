@@ -1,4 +1,4 @@
-# 🤖 AI Virtual Avatar Interviewer System
+# 🤖 Git-Hired Interviewer System
 
 A comprehensive, intelligent technical interview platform powered by Claude AI, featuring real-time avatar interaction via Tavus, adaptive questioning, and automated report generation.
 
@@ -248,31 +248,31 @@ curl -X POST http://localhost:8000/api/interview/message \
 ## 📁 Project Structure
 
 ```
-ai-interviewer/
-├── agents/                      # AI Agents
-│   ├── resume_evaluator.py     # Resume analysis agent
-│   ├── interviewer.py           # Interview conductor agent
-│   ├── code_evaluator.py       # Code assessment agent
-│   └── report_generator.py     # Report creation agent
+git-hired/
+├── agents/                            # AI Agents
+│   ├── resume_evaluator.py            # Resume analysis agent
+│   ├── interviewer.py                 # Interview conductor agent
+│   ├── code_evaluator.py              # Code assessment agent
+│   └── report_generator.py            # Report creation agent
 ├── backend/
-│   └── server.py                # FastAPI server
+│   └── server.py                      # FastAPI server
 ├── config/
-│   └── settings.py              # Configuration management
+│   └── settings.py                    # Configuration management
 ├── frontend/
-│   └── index.html               # React application
+│   └── index.html                     # React application
 ├── prompts/
-│   └── agent_prompts.py         # All agent prompts
-├── logs/                        # Interview transcripts
+│   └── agent_prompts.py               # All agent prompts
+├── logs/                              # Interview transcripts
 │   └── <session_id>/
 │       ├── resume_analysis.txt
 │       ├── interview_transcript.txt
 │       └── code_evaluation.txt
-├── reports/                     # Generated reports
+├── reports/                           # Generated reports
 │   └── <session_id>/
 │       └── interview_report.md
-├── requirements.txt             # Python dependencies
-├── .env.example                 # Environment template
-└── README.md                    # This file
+├── requirements.txt                   # Python dependencies
+├── .env.example                       # Environment template
+└── README.md                          # This file
 ```
 
 ## 🔧 Agents
