@@ -15,8 +15,15 @@ import {
   X,
   Sparkles,
   Zap,
-  Target
+  Target,
+  Loader2,
 } from "lucide-react";
+import { 
+  convertPdfToBase64, 
+  formatJobDescription, 
+  initializeSession,
+  storeSessionData 
+} from "../utils/api.utils";
 
 const JOB_TYPES = [
   {
@@ -78,6 +85,7 @@ function LandingPage() {
   const [selectedJobType, setSelectedJobType] = useState<string>("");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const canProceed = selectedFile !== null && selectedJobType !== "";
   const selectedJob = JOB_TYPES.find((job) => job.id === selectedJobType);
@@ -123,15 +131,44 @@ function LandingPage() {
     setError("");
   };
 
-  const handleProceed = () => {
-    if (canProceed) {
-      localStorage.setItem("resumeFileName", selectedFile!.name);
-      localStorage.setItem("selectedJobType", selectedJobType);
-      localStorage.setItem("jobTitle", selectedJob!.title);
-      sessionStorage.setItem("resumeFileName", selectedFile!.name);
-      sessionStorage.setItem("selectedJobType", selectedJobType);
-      sessionStorage.setItem("jobTitle", selectedJob!.title);
+const handleProceed = async () => {
+    if (!canProceed) return;
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      // Convert PDF to base64
+      const resumeBase64 = await convertPdfToBase64(selectedFile!);
+
+      // Format job description
+      const jobDescription = formatJobDescription(selectedJob!);
+
+      // Initialize session via API
+      const response = await initializeSession({
+        resume_base64: resumeBase64,
+        job_description: jobDescription,
+        candidate_name: "Nikhil",
+        job_role: selectedJob!.title
+      });
+
+      // Store session data
+      storeSessionData({
+        resumeFileName: selectedFile!.name,
+        selectedJobType: selectedJobType,
+        jobTitle: selectedJob!.title,
+        candidateName: "Nikhil",
+        sessionId: response.session_id,
+        avatarUrl: response.avatar_url
+      });
+
+      // Navigate to interview
       navigate("/interview");
+    } catch (err) {
+      console.error("Error initializing session:", err);
+      setError(err instanceof Error ? err.message : "Failed to initialize interview session. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -411,20 +448,29 @@ function LandingPage() {
           <div className="flex flex-col items-center gap-2">
             <button
               onClick={handleProceed}
-              disabled={!canProceed}
+              disabled={!canProceed || isLoading}
               className={`group relative px-8 py-3 rounded-xl font-bold text-base transition-all duration-300 ${
-                canProceed
+                canProceed && !isLoading
                   ? "bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-xl shadow-blue-500/50 hover:shadow-2xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}
             >
               <span className="flex items-center gap-2">
-                Start Your AI Interview
-                <ArrowRight className={`w-5 h-5 ${canProceed ? "group-hover:translate-x-1" : ""} transition-transform`} />
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Initializing Interview...
+                  </>
+                ) : (
+                  <>
+                    Start Your AI Interview
+                    <ArrowRight className={`w-5 h-5 ${canProceed ? "group-hover:translate-x-1" : ""} transition-transform`} />
+                  </>
+                )}
               </span>
             </button>
             
-            {!canProceed && (
+            {!canProceed && !isLoading && (
               <div className="flex items-center gap-2 text-xs text-gray-600 bg-white/60 backdrop-blur-sm px-4 py-1.5 rounded-lg border border-gray-200">
                 <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse"></div>
                 Upload your resume and select a position to continue
