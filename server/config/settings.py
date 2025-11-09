@@ -28,6 +28,7 @@ class APIConfig(BaseModel):
     livekit_api_key: str = Field(default_factory=lambda: os.getenv("LIVEKIT_API_KEY", ""))
     livekit_api_secret: str = Field(default_factory=lambda: os.getenv("LIVEKIT_API_SECRET", ""))
 
+
 class InterviewConfig(BaseModel):
     """Interview Settings"""
     # Interview duration in minutes

@@ -1,0 +1,225 @@
+================================================================================
+RESUME ANALYSIS FOR INTERVIEW
+================================================================================
+
+# Resume Evaluation Analysis: Meghanand Gejjela - Frontend Developer Role
+
+## 1. Candidate Profile Summary
+
+**Experience Level:** Entry-level/Junior (1-2 years equivalent)
+- Currently pursuing MS in Computer Science (graduating May 2027)
+- 1 month professional internship experience at Infosys
+- Strong academic background with multiple projects and publications
+
+**Current Status:** Graduate student with iOS development internship experience
+**Key Technical Skills:** iOS/SwiftUI, Python, ML/AI, Computer Vision, NLP, LLMs
+**Notable Achievements:** 
+- Top academic performer (9.65 GPA)
+- National hackathon rankings (Top 8-10)
+- Published research paper on LLMs
+- Released open-source benchmarking suite on HuggingFace
+
+**Education:** Strong technical foundation with AI/ML specialization
+
+## 2. Skills Match Analysis
+
+### ✅ **Skills Candidate HAS (with evidence):**
+- **JavaScript/Programming Logic:** Demonstrated through multiple technical projects
+- **API Integration:** Gemini API integration in iOS app, REST API work implied in projects
+- **Git/Version Control:** GitHub profile mentioned, open-source contributions
+- **Testing Mindset:** Implemented comprehensive test suites in LLM benchmark project
+- **Performance Optimization:** Memory profiling, execution time optimization in LLM project
+- **Problem-solving:** Competitive programming problems, hackathon success
+
+### ❌ **Critical Skills MISSING/Not Mentioned:**
+- **React/Vue.js:** No mention of either framework
+- **TypeScript:** Not mentioned anywhere
+- **HTML/CSS:** No web development experience shown
+- **Frontend State Management:** No Redux, RTK, Zustand experience
+- **Modern CSS (Flexbox/Grid):** No evidence of CSS skills
+- **Frontend Testing (Jest/RTL, Cypress):** No frontend testing experience
+- **Responsive Design:** No web UI development shown
+
+### 🔶 **Additional Relevant Skills:**
+- **Mobile Development:** SwiftUI/iOS (transferable UI concepts)
+- **AI/ML Integration:** Could be valuable for AI-powered frontend features
+- **System Design:** Benchmarking architecture, pipeline design
+- **Data Processing:** Large-scale image processing (250K+ images)
+
+## 3. Experience Alignment
+
+### **Relevant Experience:**
+- **UI Development:** iOS app with SwiftUI (mobile UI experience)
+- **API Integration:** Gemini API integration shows REST API understanding
+- **User Experience Focus:** "User-friendly feature" design in hospital app
+- **Agile Methodology:** Professional development practices
+
+### **Gaps:**
+- **No Web Development Experience:** All projects are backend/ML focused
+- **No React/Vue Projects:** Core requirement completely missing
+- **No Frontend Portfolio:** No web applications demonstrated
+- **Limited Professional Experience:** Only 1-month internship
+
+## 4. Interview Focus Areas
+
+### **TOP 5 Technical Topics to Probe:**
+1. **JavaScript Fundamentals** - Test core language knowledge despite no web projects
+2. **API Integration Patterns** - Leverage their Gemini API experience
+3. **UI/UX Principles** - Build on SwiftUI mobile experience
+4. **Problem-solving Approach** - Utilize their competitive programming background
+5. **Learning Agility** - Critical given the skill gap in required technologies
+
+### **Specific Resume-Based Questions:**
+1. "Walk me through the architecture of your hospital management iOS app and how you integrated the Gemini API"
+2. "In your LLM benchmarking project, how did you handle performance profiling? How might similar concepts apply to frontend performance?"
+3. "Your entity extraction pipeline processed 250K images - how would you approach building a frontend interface for users to interact with such large datasets?"
+4. "Describe the user experience considerations you made in your hospital app's specialist suggestion feature"
+5. "How would you adapt your agile experience from Infosys to a frontend development team?"
+
+### **Gaps to Clarify:**
+- Any self-taught web development experience not mentioned
+- Familiarity with web technologies through coursework
+- Interest and timeline for learning React/Vue
+- Understanding of web vs mobile development differences
+
+## 5. Suggested Interview Strategy
+
+### **Recommended Starting Level:** Easy to Medium
+- Begin with fundamental concepts they should know
+- Gradually increase complexity based on responses
+
+### **Key Strengths to Validate:**
+- **Problem-solving ability** through algorithmic questions
+- **API integration skills** via practical scenarios
+- **Learning capacity** given their academic excellence
+- **System thinking** from their benchmarking project
+
+### **Potential Weaknesses to Assess:**
+- **Web development fundamentals** (HTML/CSS/DOM)
+- **Frontend-specific challenges** (state management, rendering)
+- **Browser compatibility and performance** concepts
+- **Responsive design** understanding
+
+### **Cultural/Behavioral Aspects:**
+- Adaptability to new technology stack
+- Collaboration in cross-functional teams
+- Initiative in self-learning
+- Communication of technical concepts
+
+## 6. Warm-up Topics
+
+### **Comfortable Starting Points:**
+1. **iOS App Development Experience** - "Tell me about your hospital management app and the technical decisions you made"
+2. **API Integration** - "How did you handle API responses and error states in your Gemini integration?"
+3. **Performance Optimization** - "Walk me through your approach to memory and time profiling in your LLM benchmark"
+
+## 7. Challenge Areas
+
+### **Advanced Topics to Test Depth:**
+1. **Cross-platform UI Concepts** - "How would you translate your SwiftUI knowledge to web development?"
+2. **Large-scale Data Handling** - "Design a frontend interface for your entity extraction system that handles real-time processing updates"
+3. **Performance at Scale** - "Given your experience with benchmarking, how would you approach frontend performance monitoring?"
+
+## 🚨 **Key Recommendation:**
+
+This candidate shows **strong technical aptitude and learning ability** but has a **significant skill gap** in core frontend requirements. They would be better suited for:
+- **Junior/Trainee Frontend Developer** role with extensive onboarding
+- **Full-stack role** leveraging their backend/AI skills while learning frontend
+- **6-month timeline** to become productive in React/Vue
+
+**Interview Strategy:** Focus on **potential over experience** - assess learning agility, problem-solving approach, and cultural fit rather than deep frontend knowledge.
+
+================================================================================
+ORIGINAL RESUME TEXT
+================================================================================
+
+# Meghanand Gejjela
+**meghss@umich.edu | 734-210-4744 | Linkedin | Github**
+
+## EDUCATION
+
+**University of Michigan** - Ann Arbor, Michigan  
+Major: Master of Science, Computer Science and Engineering - Graduation: May 2027  
+Relevant Courses: Natural Language Processing, Advanced Techniques in Computer Vision, Human-Computer Interaction
+
+**SRM Institute of Science and Technology** - Cumulative GPA: 9.65 - Chennai, Tamil Nadu  
+Major: Bachelor of Technology, Artificial Intelligence - Graduation: August 2025  
+Scholarships: Merit Based Scholarship: Dec 2024, Merit Based Scholarship: Dec 2023, Merit Based Scholarship: Dec 2022
+
+## EXPERIENCE
+
+**Infosys** - Mysore, Karnataka  
+**iOS App Development Intern** - April 2024 – May 2024
+- Engineered a hospital management iOS application using SwiftUI, integrating Gemini API to provide AI-powered specialist suggestions based on user-reported symptoms.
+- Applied agile methodologies throughout the project, fostering team collaboration and simulating a professional development environment.
+- Devised a user-friendly feature integrated with the Gemini API to assist patients in navigating unfamiliar medical specialties, enhancing informed decision-making for first-time healthcare seekers.
+
+## PROJECTS
+
+**LLM Efficiency Benchmark**  
+*Large Language Models, Subprocess Sandboxing, Memory Profiling, HuggingFace, Evaluation Metrics*
+- Designed and built a benchmark to evaluate Large Language Models (LLMs) on functional correctness, execution time, and memory usage across ~50 curated competitive programming problems.
+- Implemented sandboxed subprocess evaluation with dynamic time and memory profiling using tracemalloc and threading, ensuring test case isolation and fairness.
+- Created a multi-level test suite and scoring system combining Pass@1 and efficiency-based metrics (time + memory) for fine-grained performance ranking.
+- Benchmarked 10+ open-source LLMs (e.g., LLaMA, Mistral, DeepSeek, Gemini) and human-written solutions, achieving clear comparative insights through visualizations.
+- Released dataset and benchmarking suite on HuggingFace, enabling reproducible experiments and community contribution
+
+**Entity Extraction from Images**  
+*Florence-2-large, PaddleOCR, spaCy, OpenCV, Custom NER*
+- Built an extraction pipeline processing over 250,000 images to retrieve key details like weight, volume, and dimensions with 60% accuracy.
+- Applied Florence-2-large and PaddleOCR for text extraction from distorted images, achieving 90% accuracy in challenging layouts.
+- Preprocessed over 250,000 images using OpenCV to enhance data clarity and fine-tuned a custom spaCy NER model, attaining over 92% accuracy in classifying metrics like voltage and weight, extracting standardized data formats.
+
+**Histify**  
+*Large Language Models, Stable Diffusion, GeminiAI, Streamlit*
+- Created a platform for students understand theoretical subjects by visualizing concepts through stories.
+- Fine-tuned GeminiAI to actively extract key information, achieving 90% accuracy
+- Developed interactive quizzes and a Q&A section to enhance learning and clarify doubts.
+
+**Virtual Try On**  
+*CNN, Transfer Learning, OpenCV, PIL, Semantic Segmentation*
+- Executed the implementation of the VITON-HD paper by Seunghwan Choi et al. and reached around 75% of accuracy.
+- Implemented techniques such as image segmentation, image masking, posture detection, each achieving over 95% accuracy.
+
+## ACHIEVEMENTS
+
+1. Attained the highest score in the department during the first year of college.
+2. Ranked top 8 out of a thousand applicants in national level hackathon DS Hack 2.0.
+3. Secured a top 10 ranking in the prestigious national hackathon CAD 2.0.
+
+## PUBLICATIONS
+
+Meghanand Gejjela, Arun, C., Bhadja, K., Anupama, C.G., Selvakumarasamy, S., & Gopinath, N. (2025). From Prompts to Contexts: Analysis of LLM's Strengths and Weaknesses in Capturing Nuance. In: Proceedings of the 3rd International Conference on Power Engineering and Intelligent Systems (PEIS 2025), National Institute of Technology Uttarakhand, India.  
+To appear in Springer Lecture Notes in Electrical Engineering (LNEE), SCOPUS-indexed.
+
+================================================================================
+JOB DESCRIPTION
+================================================================================
+
+Here’s a tight, ready-to-post version:
+
+# Frontend Developer (React/Vue, TypeScript)
+
+**Location:** [Remote/Hybrid/Onsite – City] · **Type:** [Full-time/Contract] · **Level:** [Junior/Mid/Senior]
+
+**Role:** Build fast, accessible, and reliable web UIs with React/Vue + TypeScript. Collaborate with Product/Design/Backend to ship features end-to-end.
+
+**Responsibilities**
+
+* Implement responsive components & pages from Figma/specs
+* Integrate REST/GraphQL APIs; manage state, caching, and errors
+* Ensure quality via tests (Jest/RTL, Cypress/Playwright) and code reviews
+* Optimize performance (Core Web Vitals, bundle size) and accessibility (WCAG)
+* Document patterns and contribute to the design system/Storybook
+
+**Requirements**
+
+* Strong JS/TS, semantic HTML, modern CSS (Flex/Grid)
+* Production experience with React or Vue + routing/state (Redux/RTK, Query, Pinia, Zustand)
+* Git/CI; debugging/perf tooling familiarity
+
+**Nice to Have**
+
+* Next.js/Nuxt, Tailwind, Storybook, GraphQL, WebSockets, Sentry/Datadog
+
+**Apply:** Send resume + portfolio/GitHub to **[[careers@company.com](mailto:careers@company.com)]**.
