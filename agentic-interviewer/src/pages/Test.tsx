@@ -6,34 +6,37 @@ const CameraCheck: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  
+
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
-  const [faceStatus, setFaceStatus] = useState<"checking" | "in_frame" | "out_of_frame">("checking");
+  const [faceStatus, setFaceStatus] = useState<
+    "checking" | "in_frame" | "out_of_frame"
+  >("checking");
   const [cameraEnabled, setCameraEnabled] = useState<boolean>(false);
   const [audioEnabled, setAudioEnabled] = useState<boolean>(false);
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [error, setError] = useState<string>("");
   const [isRetrying, setIsRetrying] = useState<boolean>(false);
-  
+
   const navigate = useNavigate();
 
   // Setup audio analyzer for visual feedback
   const setupAudioAnalyzer = (mediaStream: MediaStream) => {
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
       const analyser = audioContext.createAnalyser();
       const microphone = audioContext.createMediaStreamSource(mediaStream);
-      
+
       analyser.smoothingTimeConstant = 0.8;
       analyser.fftSize = 1024;
-      
+
       microphone.connect(analyser);
-      
+
       audioContextRef.current = audioContext;
       analyserRef.current = analyser;
-      
+
       // Start monitoring audio levels
       monitorAudioLevel();
     } catch (err) {
@@ -43,19 +46,19 @@ const CameraCheck: React.FC = () => {
 
   const monitorAudioLevel = () => {
     if (!analyserRef.current) return;
-    
+
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    
+
     const checkLevel = () => {
       if (!analyserRef.current) return;
-      
+
       analyserRef.current.getByteFrequencyData(dataArray);
       const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
       setAudioLevel(Math.min(100, (average / 255) * 200)); // Scale to 0-100
-      
+
       requestAnimationFrame(checkLevel);
     };
-    
+
     checkLevel();
   };
 
@@ -64,38 +67,40 @@ const CameraCheck: React.FC = () => {
     try {
       setIsRetrying(true);
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
+        video: {
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          facingMode: "user"
+          facingMode: "user",
         },
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
         },
       });
-      
+
       setStream(mediaStream);
-      
+
       const videoTrack = mediaStream.getVideoTracks()[0];
       const audioTrack = mediaStream.getAudioTracks()[0];
-      
+
       setCameraEnabled(videoTrack?.enabled || false);
       setAudioEnabled(audioTrack?.enabled || false);
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
-      
+
       // Setup audio analyzer
       if (audioTrack) {
         setupAudioAnalyzer(mediaStream);
       }
-      
+
       setError("");
       setIsRetrying(false);
     } catch (error) {
-      setError("Camera or microphone access denied. Please allow permissions and try again.");
+      setError(
+        "Camera or microphone access denied. Please allow permissions and try again."
+      );
       setIsRetrying(false);
       console.error("Media access error:", error);
     }
@@ -129,7 +134,7 @@ const CameraCheck: React.FC = () => {
 
     socket.onmessage = (event: MessageEvent) => {
       console.log("Message from server:", event.data);
-      
+
       if (event.data === "face_in_frame") {
         setFaceStatus("in_frame");
       } else if (event.data === "face_out_of_frame") {
@@ -152,7 +157,7 @@ const CameraCheck: React.FC = () => {
 
   const handleRetry = () => {
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
     }
     if (ws) {
       ws.close();
@@ -165,10 +170,10 @@ const CameraCheck: React.FC = () => {
 
   useEffect(() => {
     startMedia();
-    
+
     return () => {
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
       }
       if (ws) {
         ws.close();
@@ -187,6 +192,7 @@ const CameraCheck: React.FC = () => {
 
   useEffect(() => {
     let interval: number;
+    let interval: number;
     if (isStreaming) {
       interval = setInterval(captureAndSendFrame, 500);
     }
@@ -195,7 +201,7 @@ const CameraCheck: React.FC = () => {
 
   const handleProceed = () => {
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
     }
     if (ws) {
       ws.close();
@@ -209,7 +215,8 @@ const CameraCheck: React.FC = () => {
     navigate("/landing");
   };
 
-  const canProceed = cameraEnabled && audioEnabled && faceStatus === "in_frame" && isStreaming;
+  const canProceed =
+    cameraEnabled && audioEnabled && faceStatus === "in_frame" && isStreaming;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-blue-50 via-cyan-50 to-blue-100 flex items-center justify-center p-2 md:p-4">
@@ -265,7 +272,7 @@ const CameraCheck: React.FC = () => {
               muted
               className="w-full h-full object-cover bg-black"
             />
-            
+
             {/* Video Overlay Effects */}
             <div className="absolute inset-0 pointer-events-none">
               {/* Corner guides - Blue theme */}
@@ -283,7 +290,7 @@ const CameraCheck: React.FC = () => {
                   Connecting...
                 </div>
               )}
-              
+
               {faceStatus === "out_of_frame" && isStreaming && (
                 <div className="bg-yellow-500/90 backdrop-blur-sm text-white px-5 py-2 rounded-full text-sm font-semibold shadow-lg animate-bounce flex items-center gap-2">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -295,12 +302,7 @@ const CameraCheck: React.FC = () => {
             </div>
           </div>
 
-          <canvas
-            ref={canvasRef}
-            width={640}
-            height={480}
-            className="hidden"
-          />
+          <canvas ref={canvasRef} width={640} height={480} className="hidden" />
 
           {/* Status Indicators - Compact */}
           <div className="w-full max-w-4xl bg-white/80 backdrop-blur-md rounded-xl p-4 mb-3 border border-blue-100 shadow-xl">
@@ -322,7 +324,11 @@ const CameraCheck: React.FC = () => {
                 </div>
                 <div className="flex-1">
                   <p className="text-gray-900 font-semibold text-sm">Camera</p>
-                  <p className={`text-xs font-medium ${cameraEnabled ? "text-green-600" : "text-red-600"}`}>
+                  <p
+                    className={`text-xs font-medium ${
+                      cameraEnabled ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
                     {cameraEnabled ? "Enabled" : "Disabled"}
                   </p>
                 </div>
@@ -344,8 +350,14 @@ const CameraCheck: React.FC = () => {
                   )}
                 </div>
                 <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-sm">Microphone</p>
-                  <p className={`text-xs font-medium ${audioEnabled ? "text-green-600" : "text-red-600"}`}>
+                  <p className="text-gray-900 font-semibold text-sm">
+                    Microphone
+                  </p>
+                  <p
+                    className={`text-xs font-medium ${
+                      audioEnabled ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
                     {audioEnabled ? "Enabled" : "Disabled"}
                   </p>
                   {/* Audio Level Bar - Blue theme */}
@@ -376,8 +388,14 @@ const CameraCheck: React.FC = () => {
                   )}
                 </div>
                 <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-sm">Connection</p>
-                  <p className={`text-xs font-medium ${isStreaming ? "text-green-600" : "text-yellow-600"}`}>
+                  <p className="text-gray-900 font-semibold text-sm">
+                    Connection
+                  </p>
+                  <p
+                    className={`text-xs font-medium ${
+                      isStreaming ? "text-green-600" : "text-yellow-600"
+                    }`}
+                  >
                     {isStreaming ? "Connected" : "Connecting..."}
                   </p>
                 </div>
@@ -398,8 +416,20 @@ const CameraCheck: React.FC = () => {
             {canProceed ? (
               <span className="flex items-center justify-center gap-2">
                 Proceed to Landing Page
-                <svg className={`w-5 h-5 ${canProceed ? "group-hover:translate-x-1" : ""} transition-transform`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                <svg
+                  className={`w-5 h-5 ${
+                    canProceed ? "group-hover:translate-x-1" : ""
+                  } transition-transform`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 7l5 5m0 0l-5 5m5-5H6"
+                  />
                 </svg>
               </span>
             ) : (
