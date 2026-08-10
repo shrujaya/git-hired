@@ -176,7 +176,7 @@ class CodeEvaluationAgent:
         # Call Claude API
         try:
             response = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"),
                 max_tokens=2000,
                 system=self.create_evaluation_prompt(),
                 messages=[
@@ -188,7 +188,7 @@ class CodeEvaluationAgent:
             )
             
             # Extract and parse JSON response
-            response_text = response.content[0].text.strip()
+            response_text = next(b.text for b in response.content if b.type == "text").strip()
             
             # Remove markdown code blocks if present
             if response_text.startswith("```"):

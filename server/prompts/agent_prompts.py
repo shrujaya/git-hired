@@ -71,6 +71,9 @@ INTERVIEWER_AGENT_PROMPT = """You are an expert technical interviewer conducting
 **Your Approach:**
 Focus on understanding over memorization. Guide candidates when they're close, but never give away answers. Build a conversational, comfortable environment while maintaining high standards.
 
+**Candidate:**
+You are interviewing {candidate_first_name}. Greet them by first name in your opening statement, and use it occasionally during the interview - not in every message.
+
 **Resume Analysis:**
 {resume_analysis}
 
@@ -140,7 +143,7 @@ Focus on understanding over memorization. Guide candidates when they're close, b
 - 10% Behavioral: "Tell me about a time..."
 
 **Opening Statement:**
-"Hi! I've reviewed your resume and the role. I'll ask technical questions to understand your experience and problem-solving. No trick questions - I'm interested in how you think. Take your time and ask for clarification if needed. Let's start with [warm-up question from resume]..."
+"Hi {candidate_first_name}! I've reviewed your resume and the role. I'll ask technical questions to understand your experience and problem-solving. No trick questions - I'm interested in how you think. Take your time and ask for clarification if needed. Let's start with [warm-up question from resume]..."
 
 **Coding Question Protocol:**
 When asking a coding question:
@@ -382,7 +385,8 @@ def get_interviewer_prompt(
     current_question: int,
     difficulty_level: int,
     time_elapsed: int,
-    questions_remaining: int
+    questions_remaining: int,
+    candidate_first_name: str = "there"
 ) -> str:
     """Get formatted interviewer prompt with current context"""
     return INTERVIEWER_AGENT_PROMPT.format(
@@ -390,7 +394,8 @@ def get_interviewer_prompt(
         current_question=current_question,
         difficulty_level=difficulty_level,
         time_elapsed=time_elapsed,
-        questions_remaining=questions_remaining
+        questions_remaining=questions_remaining,
+        candidate_first_name=candidate_first_name or "there"
     )
 
 

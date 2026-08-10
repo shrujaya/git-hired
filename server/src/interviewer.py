@@ -113,13 +113,13 @@ class Interviewer:
         
         # Get first question from Claude
         response = self.client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"),
             max_tokens=2000,
             system=self.create_initial_system_prompt(),
             messages=self.conversation_history
         )
         
-        assistant_message = response.content[0].text
+        assistant_message = next(b.text for b in response.content if b.type == "text")
         self.conversation_history.append({
             "role": "assistant",
             "content": assistant_message
@@ -144,13 +144,13 @@ class Interviewer:
         
         # Get Claude's response
         response = self.client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"),
             max_tokens=2000,
             system=self.create_initial_system_prompt(),
             messages=self.conversation_history
         )
         
-        assistant_message = response.content[0].text
+        assistant_message = next(b.text for b in response.content if b.type == "text")
         self.conversation_history.append({
             "role": "assistant",
             "content": assistant_message

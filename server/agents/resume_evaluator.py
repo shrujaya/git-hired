@@ -14,6 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import config
 from prompts.agent_prompts import get_resume_evaluator_prompt
+from agents.response_utils import first_text
 
 
 class ResumeEvaluatorAgent:
@@ -61,8 +62,71 @@ class ResumeEvaluatorAgent:
             }]
         )
         
-        return message.content[0].text
-    
+        return first_text(message)
+
+    def extract_candidate_name(self, resume_text: str) -> Dict[str, str]:
+        """
+        Read the candidate's name off the resume.
+
+        Returns:
+            {"full_name": ..., "first_name": ...}. Both are "" when the resume
+            has no identifiable name — callers fall back to a generic label.
+        """
+        print("👤 Reading candidate name from resume...")
+
+        # Structured output so this is parsed, not scraped out of prose.
+        # Thinking is off: this is a lookup, not a reasoning task.
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=256,
+            thinking={"type": "disabled"},
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "full_name": {
+                                "type": "string",
+                                "description": "The candidate's full name exactly as written on the resume, or an empty string if absent."
+                            },
+                            "first_name": {
+                                "type": "string",
+                                "description": "The candidate's first/given name only, or an empty string if absent."
+                            },
+                        },
+                        "required": ["full_name", "first_name"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Identify the candidate whose resume this is. The name is usually "
+                    "the heading at the top. Do not return names of referees, employers, "
+                    "schools, or cited people. If there is no candidate name, return "
+                    "empty strings.\n\nResume:\n" + resume_text
+                )
+            }]
+        )
+
+        try:
+            name = json.loads(first_text(response))
+            full_name = (name.get("full_name") or "").strip()
+            first_name = (name.get("first_name") or "").strip()
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"⚠️  Could not read name from resume: {e}")
+            return {"full_name": "", "first_name": ""}
+
+        # If only a full name came back, take its leading token as the first name.
+        if full_name and not first_name:
+            first_name = full_name.split()[0]
+
+        print(f"✅ Candidate name: {full_name or '(not found)'}")
+
+        return {"full_name": full_name, "first_name": first_name}
+
     def analyze_resume(
         self,
         resume_text: str,
@@ -87,14 +151,13 @@ class ResumeEvaluatorAgent:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4096,
-            temperature=0.3,  # Lower temperature for analytical task
             messages=[{
                 "role": "user",
                 "content": prompt
             }]
         )
         
-        analysis_text = response.content[0].text
+        analysis_text = first_text(response)
         
         print("✅ Resume analysis complete!")
         
@@ -170,17 +233,22 @@ class ResumeEvaluatorAgent:
         # Extract text
         print("📄 Extracting text from resume PDF...")
         resume_text = self.extract_text_from_pdf(pdf_bytes)
-        
+
+        # Read the candidate's name off the resume
+        name = self.extract_candidate_name(resume_text)
+
         # Analyze
         analysis = self.analyze_resume(resume_text, job_description)
-        
+
         # Save
         analysis_file = self.save_analysis(analysis, session_id)
-        
+
         return {
             **analysis,
             "analysis_file": str(analysis_file),
-            "session_id": session_id
+            "session_id": session_id,
+            "candidate_name": name["full_name"],
+            "candidate_first_name": name["first_name"],
         }
 
 

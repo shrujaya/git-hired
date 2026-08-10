@@ -14,6 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import config, DifficultyLevel, ResponseQuality
 from prompts.agent_prompts import get_interviewer_prompt, RESPONSE_QUALITY_EVALUATOR_PROMPT
+from agents.response_utils import first_text
 
 
 class InterviewerAgent:
@@ -21,13 +22,14 @@ class InterviewerAgent:
     Adaptive technical interviewer agent with real-time difficulty adjustment
     """
     
-    def __init__(self, resume_analysis: str, api_key: str = None):
+    def __init__(self, resume_analysis: str, api_key: str = None, candidate_first_name: str = ""):
         self.api_key = api_key or config.api.anthropic_api_key
         self.client = anthropic.Anthropic(api_key=self.api_key)
         self.model = config.interview.claude_model
         
         # Interview state
         self.resume_analysis = resume_analysis
+        self.candidate_first_name = candidate_first_name
         self.conversation_history: List[Dict] = []
         self.transcript: List[Dict] = []
         
@@ -58,13 +60,13 @@ class InterviewerAgent:
             time_elapsed=0,
             questions_remaining=config.interview.warmup_questions + 
                               config.interview.core_questions +
-                              config.interview.advanced_questions
+                              config.interview.advanced_questions,
+            candidate_first_name=self.candidate_first_name
         )
         
         response = self.client.messages.create(
             model=self.model,
             max_tokens=config.interview.max_tokens,
-            temperature=config.interview.temperature,
             system=system_prompt,
             messages=[{
                 "role": "user",
@@ -72,7 +74,7 @@ class InterviewerAgent:
             }]
         )
         
-        opening = response.content[0].text
+        opening = first_text(response)
         
         # Log
         self.transcript.append({
@@ -101,10 +103,13 @@ class InterviewerAgent:
             response=response
         )
         
+        # Thinking is disabled here: this call wants a bare number, and with
+        # adaptive thinking on (the Sonnet 5 default) the small max_tokens budget
+        # would be spent thinking, leaving no score text to parse.
         evaluation = self.client.messages.create(
             model=self.model,
-            max_tokens=10,
-            temperature=0.1,
+            max_tokens=16,
+            thinking={"type": "disabled"},
             messages=[{
                 "role": "user",
                 "content": prompt
@@ -112,7 +117,7 @@ class InterviewerAgent:
         )
         
         try:
-            score = int(evaluation.content[0].text.strip())
+            score = int(first_text(evaluation).strip())
             return max(0, min(100, score))
         except:
             return 50  # Default to middle if parsing fails
@@ -183,7 +188,8 @@ class InterviewerAgent:
             current_question=self.current_question_num,
             difficulty_level=self.difficulty_level,
             time_elapsed=time_elapsed,
-            questions_remaining=questions_remaining
+            questions_remaining=questions_remaining,
+            candidate_first_name=self.candidate_first_name
         )
         
         # Add instruction for coding question if needed
@@ -196,7 +202,6 @@ class InterviewerAgent:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=config.interview.max_tokens,
-            temperature=config.interview.temperature,
             system=system_prompt,
             messages=self.conversation_history + [{
                 "role": "user",
@@ -204,7 +209,7 @@ class InterviewerAgent:
             }]
         )
         
-        next_question = response.content[0].text
+        next_question = first_text(response)
         
         # Add to history
         self.conversation_history.append({

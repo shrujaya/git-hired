@@ -78,8 +78,10 @@ RIGHT_EYE_INDICES = [362, 263]
 class SessionInitRequest(BaseModel):
     resume_base64: str
     job_description: str
-    candidate_name: str
     job_role: str
+    # Optional: the name is read off the resume. Only used as a fallback when
+    # the resume has no identifiable name.
+    candidate_name: Optional[str] = None
 
 
 class SessionInitResponse(BaseModel):
@@ -87,6 +89,9 @@ class SessionInitResponse(BaseModel):
     status: str
     message: str
     avatar_url: Optional[str] = None
+    # Name read off the resume, so the client can display the real candidate.
+    candidate_name: str
+    candidate_first_name: str
 
 
 class InterviewMessage(BaseModel):
@@ -342,30 +347,45 @@ async def initialize_session(request: SessionInitRequest):
     - Initialize avatar (if enabled)
     """
     try:
-        print(f"\n📝 Initializing session for {request.candidate_name}...")
-        
+        print(f"\n📝 Initializing session for {request.job_role}...")
+
         # Step 1: Resume Evaluation
         print("Step 1/4: Evaluating resume...")
         resume_evaluator = ResumeEvaluatorAgent()
-        
+
         session_id = str(uuid.uuid4())
-        
+
         resume_result = await resume_evaluator.process_resume(
             resume_pdf_base64=request.resume_base64,
             job_description=request.job_description,
             session_id=session_id
         )
-        
+
         resume_analysis = resume_result["analysis"]
-        
+
+        # The resume is the source of truth for the candidate's name; the
+        # request value is only a fallback for resumes with no name on them.
+        candidate_name = (
+            resume_result.get("candidate_name")
+            or (request.candidate_name or "").strip()
+            or "Candidate"
+        )
+        candidate_first_name = (
+            resume_result.get("candidate_first_name")
+            or candidate_name.split()[0]
+        )
+
         # Step 2: Create Interviewer Agent
         print("Step 2/4: Creating interviewer agent...")
-        interviewer_agent = InterviewerAgent(resume_analysis=resume_analysis)
-        
+        interviewer_agent = InterviewerAgent(
+            resume_analysis=resume_analysis,
+            candidate_first_name=candidate_first_name
+        )
+
         # Step 3: Create session
         print("Step 3/4: Creating session...")
         session_id = session_manager.create_session(
-            candidate_name=request.candidate_name,
+            candidate_name=candidate_name,
             job_role=request.job_role,
             resume_analysis=resume_analysis,
             interviewer_agent=interviewer_agent
@@ -383,13 +403,15 @@ async def initialize_session(request: SessionInitRequest):
                 session_id, resume_analysis
             )
         
-        print(f"✅ Session initialized: {session_id}\n")
-        
+        print(f"✅ Session initialized for {candidate_name}: {session_id}\n")
+
         return SessionInitResponse(
             session_id=session_id,
             status="ready",
             message="Interview session initialized successfully",
-            avatar_url=avatar_url
+            avatar_url=avatar_url,
+            candidate_name=candidate_name,
+            candidate_first_name=candidate_first_name
         )
     
     except Exception as e:

@@ -145,10 +145,10 @@ function LandingPage() {
       const jobDescription = formatJobDescription(selectedJob!);
 
       // Initialize session via API
+      // The backend reads the candidate's name off the resume it receives.
       const response = await initializeSession({
         resume_base64: resumeBase64,
         job_description: jobDescription,
-        candidate_name: "Nikhil",
         job_role: selectedJob!.title
       });
 
@@ -157,7 +157,8 @@ function LandingPage() {
         resumeFileName: selectedFile!.name,
         selectedJobType: selectedJobType,
         jobTitle: selectedJob!.title,
-        candidateName: "Nikhil",
+        candidateName: response.candidate_name,
+        candidateFirstName: response.candidate_first_name,
         sessionId: response.session_id,
         avatarUrl: response.avatar_url
       });

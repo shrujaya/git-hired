@@ -51,10 +51,14 @@ class InterviewConfig(BaseModel):
     total_interview_score: int = Field(default=100, description="Total interview score")
     
     # Model settings
-    claude_model: str = Field(default="claude-sonnet-4-20250514", description="Claude model to use")
-    max_tokens: int = Field(default=1024, description="Max tokens per response")
-    temperature: float = Field(default=0.7, description="Temperature for responses")
-
+    # The model id comes from CLAUDE_MODEL in .env — do not hardcode it anywhere else.
+    claude_model: str = Field(
+        default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
+        description="Claude model to use (set via CLAUDE_MODEL)"
+    )
+    # Sonnet 5 runs adaptive thinking by default and max_tokens caps thinking +
+    # response text together, so this needs more headroom than a non-thinking model.
+    max_tokens: int = Field(default=8192, description="Max tokens per response")
 
 class EmailConfig(BaseModel):
     """Email Configuration"""

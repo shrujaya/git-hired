@@ -3,8 +3,9 @@
 export interface SessionInitRequest {
   resume_base64: string;
   job_description: string;
-  candidate_name: string;
   job_role: string;
+  /** Optional fallback only — the backend reads the name off the resume. */
+  candidate_name?: string;
 }
 
 export interface SessionInitResponse {
@@ -12,6 +13,9 @@ export interface SessionInitResponse {
   status: string;
   message: string;
   avatar_url?: string;
+  /** Name read off the uploaded resume. */
+  candidate_name: string;
+  candidate_first_name: string;
 }
 
 export interface JobType {

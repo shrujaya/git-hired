@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import config
 from prompts.agent_prompts import get_code_evaluator_prompt
+from agents.response_utils import first_text
 
 
 class CodeEvaluatorAgent:
@@ -49,15 +50,14 @@ class CodeEvaluatorAgent:
         # Call Claude for evaluation
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=2048,
-            temperature=0.3,  # Lower temperature for consistent evaluation
+            max_tokens=4096,
             messages=[{
                 "role": "user",
                 "content": prompt
             }]
         )
         
-        evaluation_text = response.content[0].text
+        evaluation_text = first_text(response)
         
         # Parse JSON response
         try:

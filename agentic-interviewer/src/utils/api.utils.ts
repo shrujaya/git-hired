@@ -79,6 +79,7 @@ export const storeSessionData = (data: {
   selectedJobType: string;
   jobTitle: string;
   candidateName: string;
+  candidateFirstName: string;
   sessionId: string;
   avatarUrl?: string;
 }) => {
@@ -87,13 +88,15 @@ export const storeSessionData = (data: {
   localStorage.setItem("selectedJobType", data.selectedJobType);
   localStorage.setItem("jobTitle", data.jobTitle);
   localStorage.setItem("candidateName", data.candidateName);
+  localStorage.setItem("candidateFirstName", data.candidateFirstName);
   localStorage.setItem("sessionId", data.sessionId);
-  
+
   // Store in sessionStorage (for route protection)
   sessionStorage.setItem("resumeFileName", data.resumeFileName);
   sessionStorage.setItem("selectedJobType", data.selectedJobType);
   sessionStorage.setItem("jobTitle", data.jobTitle);
   sessionStorage.setItem("candidateName", data.candidateName);
+  sessionStorage.setItem("candidateFirstName", data.candidateFirstName);
   sessionStorage.setItem("sessionId", data.sessionId);
 
   // Store avatar URL if available

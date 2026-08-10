@@ -19,6 +19,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import config
 from prompts.agent_prompts import get_report_generator_prompt
+from agents.response_utils import first_text
 
 
 class ReportGeneratorAgent:
@@ -83,15 +84,14 @@ class ReportGeneratorAgent:
         # Generate report
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=4096,
-            temperature=0.5,
+            max_tokens=8192,
             messages=[{
                 "role": "user",
                 "content": prompt
             }]
         )
         
-        report_text = response.content[0].text
+        report_text = first_text(response)
         
         print("✅ Report generated successfully!")
         
