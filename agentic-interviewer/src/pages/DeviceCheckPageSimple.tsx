@@ -1,5 +1,5 @@
 // src/pages/DeviceCheckPageSimple.tsx
-import React, { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
 import { insertWebcamTestLibrary } from "@addpipe/webcam-tester";
 import type { TestResult, MediaDeviceTester } from "@addpipe/webcam-tester";

@@ -5,7 +5,6 @@ import { useFullscreen } from "../hooks/useFullscreen";
 import {
   Video,
   Mic,
-  MicOff,
   Code2,
   Send,
   Loader2,
@@ -22,8 +21,7 @@ interface TranscriptEntry {
 
 const InterviewPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isFullscreen, fullscreenExits, enterFullscreen, exitFullscreen } =
-    useFullscreen();
+  const { fullscreenExits, enterFullscreen, exitFullscreen } = useFullscreen();
 
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);

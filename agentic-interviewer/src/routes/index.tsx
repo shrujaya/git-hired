@@ -4,7 +4,6 @@ import LandingPage from "../pages/LandingPage";
 import InterviewPage from "../pages/InterviewPage";
 import ResultsPage from "../pages/ResultsPage";
 import Test from "../pages/Test";
-import AiInterview from "../pages/AiInterview";
 import {
   ProtectTestPage,
   ProtectLandingPage,

@@ -89,60 +89,62 @@ A comprehensive, intelligent technical interview platform powered by Claude AI, 
 
 ### Prerequisites
 
-- Python 3.9 or higher
-- Node.js (for frontend development, optional)
-- PDF resume files
-- API keys (Anthropic, Tavus)
+- **Python 3.9–3.12** — mediapipe publishes no wheels for 3.13+
+- **Node.js 18+** with npm (for the React frontend)
+- An **Anthropic API key** ([console.anthropic.com](https://console.anthropic.com/settings/keys))
+- Optional: Tavus keys for the avatar, SMTP credentials for emailed reports
 
-### Step 1: Clone Repository
+### Quick Start
 
 ```bash
 git clone <your-repo-url>
-cd ai-interviewer
+cd git-hired
+./setup.sh
 ```
 
-### Step 2: Install Dependencies
+`setup.sh` creates the `.venv` virtualenv, installs backend and frontend
+dependencies, verifies the mediapipe/protobuf combination actually loads, and
+seeds `server/.env` from the template. It is idempotent — re-run it any time.
 
-```bash
-pip install -r requirements.txt
-```
-
-### Step 3: Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your API keys:
+Then add your key to `server/.env`:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-xxxxx
-TAVUS_API_KEY=your_tavus_key
-TAVUS_REPLICA_ID=your_replica_id
-SENDER_EMAIL=your_email@example.com
-SENDER_PASSWORD=your_password
-MANAGER_EMAIL=manager@example.com
 ```
 
-### Step 4: Run Backend Server
+### Running
+
+Two terminals:
 
 ```bash
-cd backend
-python server.py
+# Backend → http://localhost:8000 (API docs at /docs)
+cd server/backend && ../../.venv/bin/python server.py
+
+# Frontend → http://localhost:5173
+cd agentic-interviewer && npm run dev
 ```
 
-Server will start at `http://localhost:8000`
+### Manual setup
 
-### Step 5: Open Frontend
-
-Open `frontend/index.html` in your browser, or serve it:
+If you'd rather not use the script:
 
 ```bash
-cd frontend
-python -m http.server 3000
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp server/.env.example server/.env   # then add your API key
+cd agentic-interviewer && npm install
 ```
 
-Then navigate to `http://localhost:3000`
+> **Note:** install into a dedicated virtualenv. mediapipe 0.10.21 requires
+> protobuf 4.x, and a base environment carrying protobuf 5.x fails at import
+> with `RuntimeError: Failed to parse: node {`.
+
+### Configuration
+
+All configuration lives in `server/.env` — see `server/.env.example` for the
+full list. The Claude model is set once via `CLAUDE_MODEL` and is not hardcoded
+anywhere in the source. To run without the avatar or email features, set
+`ENABLE_AVATAR=false` / `ENABLE_EMAIL_NOTIFICATIONS=false`.
 
 ## ⚙️ Configuration
 

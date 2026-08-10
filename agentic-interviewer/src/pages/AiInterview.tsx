@@ -10,7 +10,7 @@ const AiInterview: React.FC = () => {
   // Anti-cheating states
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
-  const [tabSwitches, setTabSwitches] = useState(0);
+  const [, setTabSwitches] = useState(0);
 
   const [loading, setLoading] = useState(false);
   // Interview states
@@ -22,8 +22,8 @@ const AiInterview: React.FC = () => {
   const [interviewStarted, setInterviewStarted] = useState<boolean>(false);
   const [interviewEnded, setInterviewEnded] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-  const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
+  const [, setIsSpeaking] = useState<boolean>(false);
+  const [, setCurrentQuestion] = useState<string | null>(null);
 
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(
     null
@@ -288,6 +288,11 @@ const AiInterview: React.FC = () => {
     speak(data.closing);
     setInterviewEnded(true);
   };
+
+  // Not yet wired to any control: handleExitInterview below navigates to the
+  // results page without telling the backend the interview is over, so the
+  // report is never generated. Kept for the follow-up that connects the two.
+  void endInterview;
 
   const handleExitInterview = async () => {
     await exitFullscreen();
