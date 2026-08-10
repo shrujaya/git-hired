@@ -160,7 +160,8 @@ function LandingPage() {
         candidateName: response.candidate_name,
         candidateFirstName: response.candidate_first_name,
         sessionId: response.session_id,
-        avatarUrl: response.avatar_url
+        avatarUrl: response.avatar_url,
+        avatarConversationId: response.avatar_conversation_id
       });
 
       // Navigate to interview

@@ -287,7 +287,9 @@ AI Interview System
         # Get interview duration
         transcript_json_file = session_dir / "interview_transcript.json"
         if transcript_json_file.exists():
-            with open(transcript_json_file, 'r') as f:
+            # Explicit encoding: the transcript is UTF-8, but Windows would
+            # otherwise decode it as cp1252 and fail on any non-ASCII answer.
+            with open(transcript_json_file, 'r', encoding='utf-8') as f:
                 transcript_data = json.load(f)
                 # Calculate duration from timestamps
                 if transcript_data.get('transcript'):

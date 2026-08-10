@@ -13,6 +13,8 @@ export interface SessionInitResponse {
   status: string;
   message: string;
   avatar_url?: string;
+  /** Tavus conversation id — needed to address echo interactions. */
+  avatar_conversation_id?: string;
   /** Name read off the uploaded resume. */
   candidate_name: string;
   candidate_first_name: string;

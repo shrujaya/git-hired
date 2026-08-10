@@ -1,5 +1,7 @@
 eyetracking.py
 .env
+.env.local
+.env.*.local
 __pycache__/
 server/files/*.pdf
 .DS_Store

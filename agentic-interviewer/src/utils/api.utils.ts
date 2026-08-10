@@ -1,7 +1,6 @@
 // src/utils/api.utils.ts
 import type { SessionInitRequest, SessionInitResponse, JobType } from '../types/api.types';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+import { API_BASE_URL } from '../config';
 
 /**
  * Convert PDF file to base64 string
@@ -82,6 +81,7 @@ export const storeSessionData = (data: {
   candidateFirstName: string;
   sessionId: string;
   avatarUrl?: string;
+  avatarConversationId?: string;
 }) => {
   // Store in localStorage (persists across sessions)
   localStorage.setItem("resumeFileName", data.resumeFileName);
@@ -99,9 +99,18 @@ export const storeSessionData = (data: {
   sessionStorage.setItem("candidateFirstName", data.candidateFirstName);
   sessionStorage.setItem("sessionId", data.sessionId);
 
-  // Store avatar URL if available
-  if (data.avatarUrl) {
-    localStorage.setItem("avatarUrl", data.avatarUrl);
-    sessionStorage.setItem("avatarUrl", data.avatarUrl);
+  // Store avatar data, clearing any leftovers from a previous session so a
+  // dead conversation URL is never carried into a new interview.
+  for (const [key, value] of [
+    ["avatarUrl", data.avatarUrl],
+    ["avatarConversationId", data.avatarConversationId],
+  ] as const) {
+    if (value) {
+      localStorage.setItem(key, value);
+      sessionStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    }
   }
 };

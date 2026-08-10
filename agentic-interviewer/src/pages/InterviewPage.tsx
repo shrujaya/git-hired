@@ -1,7 +1,9 @@
 // src/pages/InterviewPage.tsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFullscreen } from "../hooks/useFullscreen";
+import { useTavusAvatar, type AvatarUtterance } from "../hooks/useTavusAvatar";
+import { apiUrl, wsUrl } from "../config";
 import {
   Video,
   Mic,
@@ -59,6 +61,68 @@ const InterviewPage: React.FC = () => {
 
   // Speech synthesis
   const synthesis = window.speechSynthesis;
+
+  // Tavus avatar. When connected it runs the whole conversation: it hears the
+  // candidate, decides when they have finished a thought, and speaks the
+  // questions our backend returns. Browser speech recognition + TTS below is
+  // the push-to-talk fallback used only when the avatar is unavailable.
+  const handleUtterance = useCallback((utterance: AvatarUtterance) => {
+    setTranscript((prev) => [
+      ...prev,
+      {
+        type: utterance.role === "interviewer" ? "question" : "answer",
+        text: utterance.text,
+        timestamp: new Date(),
+      },
+    ]);
+  }, []);
+
+  const avatar = useTavusAvatar(
+    sessionStorage.getItem("avatarUrl"),
+    sessionStorage.getItem("avatarConversationId"),
+    { onUtterance: handleUtterance }
+  );
+  const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // With the avatar live, Tavus drives the microphone and turn-taking, so the
+  // manual record button and browser TTS must stay out of the way.
+  const avatarLive = avatar.status === "connected";
+
+  // Attach the replica's media to the avatar video element
+  useEffect(() => {
+    if (avatarVideoRef.current) {
+      avatarVideoRef.current.srcObject = avatar.remoteStream;
+    }
+  }, [avatar.remoteStream]);
+
+  // The avatar greets the candidate the moment it connects, so the interview
+  // is already under way — open the control channel and seed the transcript
+  // with the opening line rather than waiting for a button.
+  useEffect(() => {
+    if (!avatarLive || interviewStarted) return;
+    setInterviewStarted(true);
+    setupChatWebSocket();
+
+    (async () => {
+      try {
+        const sessionId = sessionStorage.getItem("sessionId");
+        const response = await fetch(
+          apiUrl(`/api/interview/start?session_id=${sessionId}`),
+          { method: "POST" }
+        );
+        const data = await response.json();
+        if (data.opening) {
+          setTranscript((prev) =>
+            prev.length ? prev : [
+              { type: "question", text: data.opening, timestamp: new Date() },
+            ]
+          );
+        }
+      } catch (error) {
+        console.error("Failed to record interview start:", error);
+      }
+    })();
+  }, [avatarLive, interviewStarted]);
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -151,7 +215,7 @@ const InterviewPage: React.FC = () => {
 
   // Setup video WebSocket for face detection
   const setupVideoWebSocket = () => {
-    const ws = new WebSocket("ws://localhost:8000/ws/video");
+    const ws = new WebSocket(wsUrl("/ws/video"));
 
     ws.onopen = () => {
       console.log("Video WebSocket connected");
@@ -181,7 +245,7 @@ const InterviewPage: React.FC = () => {
     const sessionId = sessionStorage.getItem("sessionId");
     if (!sessionId) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
+    const ws = new WebSocket(wsUrl(`/ws/${sessionId}`));
 
     ws.onopen = () => {
       console.log("Chat WebSocket connected");
@@ -236,8 +300,11 @@ const InterviewPage: React.FC = () => {
     );
   };
 
-  // Setup speech recognition with continuous mode
+  // Setup speech recognition with continuous mode.
+  // Only for the no-avatar fallback: when Tavus is live it does the listening,
+  // and running a second recogniser on the same mic fights with it.
   useEffect(() => {
+    if (avatarLive) return;
     if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -299,10 +366,31 @@ const InterviewPage: React.FC = () => {
     } else {
       alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
     }
-  }, []);
+  }, [avatarLive]);
 
   // Handle WebSocket message
   const handleWebSocketMessage = (data: any) => {
+    // Server-pushed control events. With Tavus driving the conversation the
+    // question reaches the candidate as speech, so these exist to keep the UI
+    // in step — opening the editor when a coding question is asked.
+    if (data.type === "coding_question") {
+      setShowCodeEditor(true);
+      return;
+    }
+
+    if (data.type === "question") {
+      // The avatar speaks (and transcribes) its own lines, so adding them
+      // here too would duplicate every question in the transcript.
+      if (!avatarLive) {
+        setTranscript((prev) => [
+          ...prev,
+          { type: "question", text: data.content, timestamp: new Date() },
+        ]);
+        speak(data.content);
+      }
+      return;
+    }
+
     if (data.type === "response") {
       const question = data.content;
       setTranscript((prev) => [
@@ -324,8 +412,14 @@ const InterviewPage: React.FC = () => {
     }
   };
 
-  // Text to speech
+  // Interviewer speech. When the avatar is live it has already spoken the
+  // line itself (Tavus generated the audio), so this is a no-op; otherwise
+  // browser TTS reads it out.
   const speak = (text: string, onEnd?: () => void) => {
+    if (avatarLive) {
+      onEnd?.();
+      return;
+    }
     synthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     const voices = synthesis.getVoices();
@@ -339,6 +433,12 @@ const InterviewPage: React.FC = () => {
     };
     synthesis.speak(utterance);
   };
+
+  // One speaking indicator across both voices
+  const interviewerSpeaking = avatarLive ? avatar.replicaSpeaking : isSpeaking;
+  // Whether the candidate is being heard right now
+  const candidateSpeaking = avatarLive ? avatar.userSpeaking : isListening;
+  const liveSpeech = avatarLive ? avatar.interimSpeech : currentSpeech;
 
   // Handle speech input when user clicks stop
   const handleSpeechInput = (speech: string) => {
@@ -372,7 +472,7 @@ const InterviewPage: React.FC = () => {
     try {
       const sessionId = sessionStorage.getItem("sessionId");
       const response = await fetch(
-        `http://localhost:8000/api/interview/start?session_id=${sessionId}`,
+        apiUrl(`/api/interview/start?session_id=${sessionId}`),
         { method: "POST" }
       );
       const data = await response.json();
@@ -430,7 +530,7 @@ const InterviewPage: React.FC = () => {
     try {
       const sessionId = sessionStorage.getItem("sessionId");
       const response = await fetch(
-        "http://localhost:8000/api/interview/code/submit",
+        apiUrl("/api/interview/code/submit"),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -626,7 +726,7 @@ const InterviewPage: React.FC = () => {
                   </svg>
                 </div>
                 <h3 className="text-sm font-bold text-gray-900">AI Interviewer</h3>
-                {isSpeaking && (
+                {interviewerSpeaking && (
                   <div className="ml-auto flex items-center gap-1">
                     <div className="w-1 h-3 bg-blue-500 rounded-full animate-pulse"></div>
                     <div className="w-1 h-4 bg-blue-500 rounded-full animate-pulse animation-delay-100"></div>
@@ -635,35 +735,80 @@ const InterviewPage: React.FC = () => {
                 )}
               </div>
               
-              {/* Avatar Placeholder */}
+              {/* Tavus avatar video, or placeholder when unavailable */}
               <div className="relative aspect-video bg-gradient-to-br from-blue-100 to-cyan-100 rounded-lg overflow-hidden flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full mx-auto mb-2 flex items-center justify-center shadow-lg">
-                    <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
+                {avatar.status === "connected" && avatar.remoteStream ? (
+                  <video
+                    // Callback ref: the element mounts after the stream
+                    // arrives, so attach here as well as in the effect.
+                    ref={(el) => {
+                      avatarVideoRef.current = el;
+                      if (el && el.srcObject !== avatar.remoteStream) {
+                        el.srcObject = avatar.remoteStream;
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="text-center">
+                    <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full mx-auto mb-2 flex items-center justify-center shadow-lg">
+                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                    </div>
+                    <p className="text-xs text-gray-600 font-medium">AI Avatar</p>
+                    <p className="text-[10px] text-gray-500">
+                      {avatar.status === "connecting" ? "Connecting…" : "Voice-only mode"}
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-600 font-medium">AI Avatar</p>
-                  <p className="text-[10px] text-gray-500">Coming Soon</p>
-                </div>
+                )}
               </div>
 
-              {/* Start Interview Button */}
-              {!interviewStarted && (
-                <button
-                  onClick={startInterview}
-                  disabled={isLoading}
-                  className="w-full mt-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:from-gray-400 disabled:to-gray-400 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-lg transition-all flex items-center justify-center gap-1.5"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Starting...
-                    </>
-                  ) : (
-                    "Start Interview"
-                  )}
-                </button>
+              {/* With the avatar live the interview starts on its own, so the
+                  only controls needed are mute and a way to cut it off. */}
+              {avatarLive ? (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={avatar.toggleMic}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5 ${
+                      avatar.micEnabled
+                        ? "bg-white text-gray-800 hover:bg-gray-100 border border-gray-200"
+                        : "bg-red-600 text-white hover:bg-red-700"
+                    }`}
+                    title={avatar.micEnabled ? "Mute microphone" : "Unmute microphone"}
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                    {avatar.micEnabled ? "Mute" : "Unmute"}
+                  </button>
+                  <button
+                    onClick={avatar.interrupt}
+                    disabled={!avatar.replicaSpeaking}
+                    className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5 bg-white text-gray-800 hover:bg-gray-100 border border-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Cut in while the interviewer is speaking"
+                  >
+                    <Square className="w-3.5 h-3.5" />
+                    Interject
+                  </button>
+                </div>
+              ) : (
+                !interviewStarted && (
+                  <button
+                    onClick={startInterview}
+                    disabled={isLoading}
+                    className="w-full mt-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:from-gray-400 disabled:to-gray-400 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-lg transition-all flex items-center justify-center gap-1.5"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      "Start Interview"
+                    )}
+                  </button>
+                )
               )}
             </div>
 
@@ -725,41 +870,65 @@ const InterviewPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Current Speech Preview */}
-                {isListening && currentSpeech && (
+                {/* Live speech preview */}
+                {candidateSpeaking && liveSpeech && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
                     <p className="text-[10px] text-blue-700 font-semibold mb-0.5">
-                      Recording...
+                      Listening…
                     </p>
                     <p className="text-xs text-gray-700 line-clamp-2">
-                      {currentSpeech}
+                      {liveSpeech}
                     </p>
                   </div>
                 )}
 
-                {/* Mic Button */}
-                {interviewStarted && (
-                  <button
-                    onClick={toggleListening}
-                    disabled={isSpeaking}
-                    className={`w-full px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-                      isListening
-                        ? "bg-red-500 hover:bg-red-600 text-white"
-                        : "bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
-                    } ${isSpeaking ? "opacity-50 cursor-not-allowed" : ""}`}
+                {/* Conversation status. With the avatar live there is nothing
+                    to press — Tavus decides when the candidate has finished. */}
+                {avatarLive ? (
+                  <div
+                    className={`w-full px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                      !avatar.micEnabled
+                        ? "bg-red-50 text-red-700 border border-red-200"
+                        : avatar.replicaSpeaking
+                        ? "bg-blue-50 text-blue-700 border border-blue-200"
+                        : candidateSpeaking
+                        ? "bg-green-50 text-green-700 border border-green-200"
+                        : "bg-gray-50 text-gray-600 border border-gray-200"
+                    }`}
                   >
-                    {isListening ? (
-                      <>
-                        <Square className="w-3.5 h-3.5 fill-current" />
-                        End Speaking
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="w-3.5 h-3.5" />
-                        Start Speaking
-                      </>
-                    )}
-                  </button>
+                    <Mic className="w-3.5 h-3.5" />
+                    {!avatar.micEnabled
+                      ? "Microphone muted"
+                      : avatar.replicaSpeaking
+                      ? "Interviewer speaking — just talk to cut in"
+                      : candidateSpeaking
+                      ? "Listening…"
+                      : "Ready — start speaking any time"}
+                  </div>
+                ) : (
+                  interviewStarted && (
+                    <button
+                      onClick={toggleListening}
+                      disabled={isSpeaking}
+                      className={`w-full px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                        isListening
+                          ? "bg-red-500 hover:bg-red-600 text-white"
+                          : "bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
+                      } ${isSpeaking ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      {isListening ? (
+                        <>
+                          <Square className="w-3.5 h-3.5 fill-current" />
+                          End Speaking
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="w-3.5 h-3.5" />
+                          Start Speaking
+                        </>
+                      )}
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -792,10 +961,16 @@ const InterviewPage: React.FC = () => {
                         </svg>
                       </div>
                       <p className="text-xs font-semibold text-gray-900 mb-1">
-                        Ready to Start
+                        {avatar.status === "connecting"
+                          ? "Connecting to your interviewer…"
+                          : "Ready to Start"}
                       </p>
                       <p className="text-[10px] text-gray-500">
-                        Click "Start Interview" to begin
+                        {avatarLive
+                          ? "Your interviewer will greet you in a moment"
+                          : avatar.status === "connecting"
+                          ? "One moment"
+                          : 'Click "Start Interview" to begin'}
                       </p>
                     </div>
                   </div>

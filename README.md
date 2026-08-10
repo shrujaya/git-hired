@@ -96,15 +96,39 @@ A comprehensive, intelligent technical interview platform powered by Claude AI, 
 
 ### Quick Start
 
+**macOS / Linux** (and Git Bash on Windows):
+
 ```bash
 git clone <your-repo-url>
 cd git-hired
 ./setup.sh
 ```
 
-`setup.sh` creates the `.venv` virtualenv, installs backend and frontend
-dependencies, verifies the mediapipe/protobuf combination actually loads, and
-seeds `server/.env` from the template. It is idempotent — re-run it any time.
+**Windows** (PowerShell):
+
+```powershell
+git clone <your-repo-url>
+cd git-hired
+.\setup.ps1
+```
+
+> If PowerShell blocks the script, allow it for this session only:
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
+
+Both scripts do the same thing: create the `.venv` virtualenv, install backend
+and frontend dependencies, verify the mediapipe/protobuf combination actually
+loads, and seed `server/.env` from the template. They are idempotent — re-run
+either any time.
+
+If you have a suitable Python that auto-detection misses (a conda environment,
+or an install not registered with the `py` launcher), point at it directly:
+
+```bash
+PYTHON_OVERRIDE=/path/to/python3.12 ./setup.sh          # macOS / Linux
+```
+```powershell
+.\setup.ps1 -Python C:\path\to\python.exe               # Windows
+```
 
 Then add your key to `server/.env`:
 
@@ -114,25 +138,80 @@ ANTHROPIC_API_KEY=sk-ant-xxxxx
 
 ### Running
 
-Two terminals:
+Two terminals.
+
+**macOS / Linux** (and Git Bash on Windows):
 
 ```bash
-# Backend → http://localhost:8000 (API docs at /docs)
-cd server/backend && ../../.venv/bin/python server.py
-
-# Frontend → http://localhost:5173
-cd agentic-interviewer && npm run dev
+./run.sh backend      # → http://localhost:8100 (API docs at /docs)
+./run.sh frontend     # → http://localhost:5173
 ```
+
+**Windows** (PowerShell):
+
+```powershell
+.\run.ps1 backend     # → http://localhost:8100 (API docs at /docs)
+.\run.ps1 frontend    # → http://localhost:5173
+```
+
+<details>
+<summary>Running without the helper scripts</summary>
+
+The backend must be started from `server/backend` — uvicorn's reloader imports
+the app by name.
+
+```bash
+cd server/backend && ../../.venv/bin/python server.py            # macOS / Linux
+```
+```powershell
+cd server\backend; ..\..\.venv\Scripts\python.exe server.py      # Windows
+```
+
+Note the path differences on Windows: a virtualenv puts the interpreter in
+`Scripts\python.exe` rather than `bin/python`, and Command Prompt cannot launch
+an executable through a forward-slash relative path (`../../.venv/...` fails
+with `'..' is not recognized`) — use backslashes there.
+</details>
+
+### Changing the port
+
+The backend defaults to port **8100**. Port 8000 is a common default and is
+frequently already taken; on Windows a service holding it surfaces as
+`[WinError 10013] An attempt was made to access a socket in a way forbidden by
+its access permissions` rather than a plain "address in use".
+
+To use a different port, set it in **both** places so they agree:
+
+```env
+# server/.env
+PORT=8200
+```
+```env
+# agentic-interviewer/.env.local   (copy from .env.example)
+VITE_API_BASE_URL=http://localhost:8200
+```
+
+The frontend derives its WebSocket URL from `VITE_API_BASE_URL`, so that is the
+only value to change on that side.
 
 ### Manual setup
 
-If you'd rather not use the script:
+If you'd rather not use the scripts:
 
 ```bash
+# macOS / Linux
 python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements.txt
 cp server/.env.example server/.env   # then add your API key
 cd agentic-interviewer && npm install
+```
+
+```powershell
+# Windows
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item server\.env.example server\.env   # then add your API key
+cd agentic-interviewer; npm install
 ```
 
 > **Note:** install into a dedicated virtualenv. mediapipe 0.10.21 requires
@@ -182,8 +261,84 @@ MANAGER_EMAIL=hiring@company.com
 Create your Tavus avatar:
 
 1. Go to [tavus.io/dashboard](https://tavus.io/dashboard)
-2. Create new replica (upload 2-5 min video)
-3. Copy Replica ID to `.env`
+2. Create a new **face** (upload 2-5 min video), or use one of Tavus's stock faces
+3. Copy the face id to `server/.env` as `TAVUS_FACE_ID=r...`
+
+Leave `TAVUS_PAL_ID` blank and the server provisions an echo-mode PAL on first
+use, printing its id so you can pin it (otherwise a new one is created each
+restart). List what your account has:
+
+```bash
+curl -H "x-api-key: $TAVUS_API_KEY" "https://tavusapi.com/v2/faces?face_type=user"
+curl -H "x-api-key: $TAVUS_API_KEY" "https://tavusapi.com/v2/faces?face_type=system"
+curl -H "x-api-key: $TAVUS_API_KEY" "https://tavusapi.com/v2/pals?pal_type=user"
+```
+
+> **Naming:** Tavus renamed *replica* → **face** and *persona* → **PAL**. Face
+> ids start with `r`, PAL ids with `p`. A legacy `TAVUS_REPLICA_ID` is still
+> read as a face id.
+
+**How it works**: the conversation is hands-free — no push-to-talk. Tavus owns
+the voice pipeline (microphone, `sparrow-1` turn detection, barge-in), and
+this repo's `InterviewerAgent` still decides every word the interviewer says.
+They are joined by pointing the PAL's **LLM layer** at this backend:
+
+```
+candidate speaks
+   → Tavus STT + sparrow-1 decides the turn is over
+      → POST <TAVUS_LLM_BASE_URL>/v1/chat/completions   (this backend)
+         → InterviewerAgent picks the next question, adapts difficulty
+      → streamed back as OpenAI SSE
+   → Tavus speaks it through the avatar, lip-synced
+   → candidate can talk over it to interrupt
+```
+
+Because Tavus calls *in*, the backend needs a public URL — see
+[Live conversation setup](#live-conversation-setup).
+
+If the avatar is disabled or fails to start, the interview falls back to the
+original push-to-talk flow with browser speech recognition and text-to-speech,
+so a broken avatar never blocks an interview. The Tavus conversation is ended
+automatically when the interview ends so it stops consuming credits.
+
+### Live conversation setup
+
+Tavus's servers must reach your backend. In production that is just your
+deployed hostname; locally you need a tunnel:
+
+```bash
+# terminal 1 - backend
+./run.sh backend
+
+# terminal 2 - tunnel (either tool)
+cloudflared tunnel --url http://localhost:8100
+ngrok http 8100
+```
+
+Copy the public `https://…` URL into `server/.env` and restart the backend:
+
+```env
+TAVUS_LLM_BASE_URL=https://your-tunnel-hostname.trycloudflare.com
+TAVUS_LLM_API_KEY=<long random string>
+```
+
+> The tunnel exposes `/v1/chat/completions` to the internet. `TAVUS_LLM_API_KEY`
+> is the bearer token that guards it — the endpoint rejects anything else, so
+> do not leave it blank. Generate one with
+> `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
+The tunnel hostname changes each time you restart `cloudflared`, so update
+`TAVUS_LLM_BASE_URL` and clear `TAVUS_PAL_ID` when it does — the PAL stores the
+URL, so a stale one leaves the avatar silent.
+
+**Tuning the feel** (all optional, in `server/.env`):
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `TAVUS_TURN_TAKING_PATIENCE` | `high` | `high` waits through thinking pauses; `low` replies faster |
+| `TAVUS_INTERRUPTIBILITY` | `medium` | How readily the avatar yields when talked over |
+| `TAVUS_IDLE_ENGAGEMENT` | `off` | `off` never prompts during silence |
+| `TAVUS_VOICE_ISOLATION` | `near` | Filters background noise from the mic |
 
 ## 📖 Usage
 
@@ -191,11 +346,14 @@ Create your Tavus avatar:
 
 1. **Start Backend Server**
    ```bash
-   python backend/server.py
+   ./run.sh backend      # Windows PowerShell: .\run.ps1 backend
    ```
 
-2. **Open Frontend**
-   - Navigate to `frontend/index.html`
+2. **Start the Frontend** (second terminal)
+   ```bash
+   ./run.sh frontend     # Windows PowerShell: .\run.ps1 frontend
+   ```
+   Then open <http://localhost:5173>
 
 3. **Upload Resume**
    - Enter candidate name
@@ -220,7 +378,7 @@ Create your Tavus avatar:
 #### Initialize Session
 
 ```bash
-curl -X POST http://localhost:8000/api/session/init \
+curl -X POST http://localhost:8100/api/session/init \
   -H "Content-Type: application/json" \
   -d '{
     "resume_base64": "<base64_pdf>",
@@ -233,13 +391,13 @@ curl -X POST http://localhost:8000/api/session/init \
 #### Start Interview
 
 ```bash
-curl -X POST "http://localhost:8000/api/interview/start?session_id=<session_id>"
+curl -X POST "http://localhost:8100/api/interview/start?session_id=<session_id>"
 ```
 
 #### Send Message
 
 ```bash
-curl -X POST http://localhost:8000/api/interview/message \
+curl -X POST http://localhost:8100/api/interview/message \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": "<session_id>",
@@ -392,12 +550,46 @@ max_duration = 60  # Change from 45 to 60 minutes
 - Ensure PDF is properly formatted
 - Check backend server is running
 
-### Issue: "Avatar not loading"
+### Issue: "Avatar not loading" / `Tavus conversation failed (400): Invalid replica_uuid`
+
+The backend prints the exact Tavus rejection at session init. `Invalid
+replica_uuid` almost always means the wrong *kind* of id is configured.
 
 **Solution**:
-- Verify TAVUS_API_KEY is set
-- Check TAVUS_REPLICA_ID is correct
-- Ensure replica is fully processed (10-30 min after creation)
+- Verify `TAVUS_API_KEY` is set
+- `TAVUS_FACE_ID` must be a **face** id (starts with `r`), not a PAL id
+  (starts with `p`). Confirm it exists:
+  `curl -H "x-api-key: $TAVUS_API_KEY" "https://tavusapi.com/v2/faces?face_ids=<id>"`
+- `TAVUS_PAL_ID`, if set, must be a PAL id (`p...`) in `pipeline_mode: echo`
+- Ensure the face is fully processed (`status: completed`)
+
+The interview still runs in voice-only mode when the avatar fails, so a broken
+avatar never blocks an interview.
+
+### Issue: Avatar connects but never speaks / says it cannot reach its brain
+
+Tavus could not call this backend. The PAL stores `TAVUS_LLM_BASE_URL` at
+creation time, so a stale tunnel hostname is the usual cause.
+
+**Solution**:
+- Confirm the tunnel is still running and the URL still resolves
+- Check the endpoint answers from outside:
+  `curl -X POST https://<tunnel-host>/v1/chat/completions -H "Authorization: Bearer $TAVUS_LLM_API_KEY" -H "Content-Type: application/json" -d '{"messages":[]}'`
+  (404 "Session not found" is a healthy response here — it means auth passed)
+- After changing `TAVUS_LLM_BASE_URL`, **clear `TAVUS_PAL_ID`** so a new PAL is
+  provisioned against the new URL, then restart the backend
+
+### Issue: The avatar asks its own questions instead of the agent's
+
+`TAVUS_PAL_ID` is pointing at a PAL whose LLM layer is not aimed at this
+backend — for example a hand-made PAL from the Tavus dashboard. Clear
+`TAVUS_PAL_ID` and let the server provision one.
+
+### Issue: The avatar interrupts too eagerly, or waits too long
+
+Tune `TAVUS_TURN_TAKING_PATIENCE` and `TAVUS_INTERRUPTIBILITY` (see
+[Live conversation setup](#live-conversation-setup)), then clear
+`TAVUS_PAL_ID` so the PAL is rebuilt with the new values.
 
 ### Issue: "Email not sending"
 
@@ -413,6 +605,74 @@ max_duration = 60  # Change from 45 to 60 minutes
 - Check coding question was asked
 - Verify code is not empty
 - Review logs in `logs/<session_id>/code_evaluation.txt`
+
+### Issue (Windows): `npm.ps1 cannot be loaded because running scripts is disabled on this system`
+
+PowerShell's default execution policy is `Restricted`, which blocks every
+`.ps1` — including npm's own wrapper and this repo's scripts.
+
+**Solution** (recommended, one time, no admin needed):
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+`RemoteSigned` allows scripts you wrote locally and still requires a signature
+on anything downloaded from the internet.
+
+To avoid changing any setting, use the `.cmd` shim instead — it is not subject
+to the policy:
+
+```powershell
+npm.cmd install
+```
+
+Or allow scripts for the current window only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+### Issue (Windows): `'..' is not recognized as an internal or external command`
+
+You are in Command Prompt, which cannot launch an executable via a
+forward-slash relative path — it splits on `/` and tries to run `..`.
+
+**Solution**: use backslashes, or just use the run script:
+
+```
+cd server\backend && ..\..\.venv\Scripts\python.exe server.py
+```
+```powershell
+.\run.ps1 backend
+```
+
+### Issue (Windows): `[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions`
+
+Another process — often a background service — already holds the port. This is
+the Windows equivalent of "address already in use".
+
+**Solution**: find the owner, then either stop it or change `PORT` in
+`server/.env` (and `VITE_API_BASE_URL` in `agentic-interviewer/.env.local`):
+
+```
+netstat -ano | findstr :8100
+tasklist /FI "PID eq <pid_from_above>"
+```
+
+### Issue (Windows): `UnicodeEncodeError: 'charmap' codec can't encode character`
+
+The console is on a legacy codepage and cannot encode the emoji in the status
+output. The server calls `enable_unicode_output()` at startup to prevent this;
+if you hit it in a standalone script under `server/src/`, add the same call, or
+run with `PYTHONUTF8=1`.
+
+### Issue: `.venv/bin/python: No such file or directory` on Windows
+
+Windows virtualenvs use `Scripts\python.exe`, not `bin/python`.
+
+**Solution**: use `.venv\Scripts\python.exe`, or the run scripts, which detect
+the layout automatically.
 
 ### Issue: "CORS errors in browser"
 
@@ -434,7 +694,7 @@ cat logs/<session_id>/interview_transcript.txt
 ### Test API Health
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8100/health
 ```
 
 ## 📊 Interview Metrics
@@ -488,7 +748,7 @@ This project is provided as-is for educational and commercial use.
 For issues and questions:
 - Check [Troubleshooting](#troubleshooting) section
 - Review logs in `logs/` directory
-- Check API documentation at `http://localhost:8000/docs`
+- Check API documentation at `http://localhost:8100/docs`
 
 ---
 

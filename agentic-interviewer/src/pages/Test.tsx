@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { wsUrl } from "../config";
 
 const CameraCheck: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -125,7 +126,7 @@ const CameraCheck: React.FC = () => {
   };
 
   const setupWebSocket = () => {
-    const socket = new WebSocket("ws://localhost:8000/ws/video");
+    const socket = new WebSocket(wsUrl("/ws/video"));
 
     socket.onopen = () => {
       console.log("Connected to FastAPI WebSocket");

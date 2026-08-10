@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFullscreen } from "../hooks/useFullscreen";
+import { apiUrl, wsUrl } from "../config";
 
 const AiInterview: React.FC = () => {
   const navigate = useNavigate();
@@ -88,7 +89,7 @@ const AiInterview: React.FC = () => {
     // WebSocket initialization
     const sessionId = sessionStorage.getItem("sessionId");
     if (sessionId) {
-      const ws = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
+      const ws = new WebSocket(wsUrl(`/ws/${sessionId}`));
       ws.onopen = () => console.log("WebSocket connected");
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -221,7 +222,7 @@ const AiInterview: React.FC = () => {
     setLoading(true);
     const sessionId = sessionStorage.getItem("sessionId");
     const response = await fetch(
-      `http://localhost:8000/api/interview/start?session_id=${sessionId}`,
+      apiUrl(`/api/interview/start?session_id=${sessionId}`),
       { method: "POST" }
     );
     const data = await response.json();
@@ -245,7 +246,7 @@ const AiInterview: React.FC = () => {
     }
     const sessionId = sessionStorage.getItem("sessionId");
     const response = await fetch(
-      `http://localhost:8000/api/interview/code/submit`,
+      apiUrl("/api/interview/code/submit"),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -271,7 +272,7 @@ const AiInterview: React.FC = () => {
     recognition?.stop();
     synthesis.cancel();
     const sessionId = sessionStorage.getItem("sessionId");
-    const response = await fetch(`http://localhost:8000/api/interview/end`, {
+    const response = await fetch(apiUrl("/api/interview/end"), {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
       headers: { "Content-Type": "application/json" },

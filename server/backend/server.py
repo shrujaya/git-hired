@@ -8,11 +8,18 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.append(str(Path(__file__).parent.parent))
+BACKEND_DIR = Path(__file__).resolve().parent
+SERVER_DIR = BACKEND_DIR.parent
+sys.path.append(str(SERVER_DIR))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
+# Must run before anything prints: the status output below contains emoji,
+# which raises UnicodeEncodeError on a legacy Windows console.
+from config.console import enable_unicode_output
+enable_unicode_output()
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import json
@@ -51,12 +58,12 @@ face_mesh = mp_face_mesh.FaceMesh(
 )
 
 
-# Log file setup
-log_dir = "./src/logs"
-os.makedirs(log_dir, exist_ok=True)
+# Log file setup. Anchored to the repo rather than the working directory so
+# the logs land in the same place no matter where the server was launched from.
+log_dir = SERVER_DIR / "src" / "logs"
+log_dir.mkdir(parents=True, exist_ok=True)
 
-log_file = os.path.join(log_dir, "eye_tracking_log.jsonl")
-print(log_file)
+log_file = log_dir / "eye_tracking_log.jsonl"
 
 def write_log(event_type, duration=None):
     log_entry = {
@@ -64,7 +71,9 @@ def write_log(event_type, duration=None):
         "event": event_type,
         "duration": duration
     }
-    with open(log_file, "a") as f:
+    # Explicit encoding: Windows would otherwise write cp1252 and choke on
+    # any non-ASCII content.
+    with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_entry) + "\n")
 
 # Eye landmark indices
@@ -89,6 +98,9 @@ class SessionInitResponse(BaseModel):
     status: str
     message: str
     avatar_url: Optional[str] = None
+    # Needed by the client to drive the avatar in echo mode (it addresses
+    # interaction messages to this conversation).
+    avatar_conversation_id: Optional[str] = None
     # Name read off the resume, so the client can display the real candidate.
     candidate_name: str
     candidate_first_name: str
@@ -137,6 +149,8 @@ class SessionManager:
     def __init__(self):
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.tavus_client: Optional[aiohttp.ClientSession] = None
+        # Resolved once per process; see ensure_tavus_pal().
+        self.tavus_pal_id: Optional[str] = None
     
     async def initialize_tavus(self):
         """Initialize Tavus HTTP client"""
@@ -148,29 +162,152 @@ class SessionManager:
                 }
             )
     
-    async def create_tavus_conversation(self, session_id: str, resume_analysis: str) -> Optional[str]:
-        """Create Tavus avatar conversation"""
-        if not self.tavus_client or not config.api.tavus_replica_id:
+    async def ensure_tavus_pal(self) -> Optional[str]:
+        """Return the PAL id to render the avatar with, provisioning if needed.
+
+        The PAL runs Tavus's full pipeline so the conversation feels live:
+        sparrow-1 decides when the candidate has actually finished a thought,
+        and the avatar yields the floor when talked over. Its LLM layer is
+        pointed back at this backend, so Tavus supplies the ears and mouth
+        while InterviewerAgent remains the brain.
+        """
+        if config.api.tavus_pal_id:
+            return config.api.tavus_pal_id
+        if self.tavus_pal_id:
+            return self.tavus_pal_id
+        if not self.tavus_client:
             return None
-        
+        if not config.api.tavus_llm_base_url:
+            print(
+                "Cannot create Tavus PAL: TAVUS_LLM_BASE_URL is unset, so Tavus "
+                "would have no way to reach this backend for interview questions"
+            )
+            return None
+
+        flow = config.conversation
+        try:
+            async with self.tavus_client.post(
+                "https://tavusapi.com/v2/pals",
+                json={
+                    "pal_name": "Git-Hired Interviewer",
+                    "pipeline_mode": "full",
+                    "default_face_id": config.api.tavus_face_id,
+                    # Our endpoint ignores this and always replies with the
+                    # InterviewerAgent's line, but Tavus requires a prompt.
+                    "system_prompt": (
+                        "You are a technical interviewer. Ask one question at a "
+                        "time and listen to the candidate's full answer."
+                    ),
+                    "layers": {
+                        "conversational_flow": {
+                            "turn_detection_model": flow.turn_detection_model,
+                            "turn_taking_patience": flow.turn_taking_patience,
+                            "pal_interruptibility": flow.pal_interruptibility,
+                            "voice_isolation": flow.voice_isolation,
+                            "idle_engagement": flow.idle_engagement,
+                        },
+                        "llm": {
+                            "model": "git-hired-interviewer",
+                            # Tavus appends /chat/completions itself.
+                            "base_url": f"{config.api.tavus_llm_base_url}/v1",
+                            "api_key": config.api.tavus_llm_api_key,
+                            # Off: speculative inference pre-runs the model on a
+                            # guessed end-of-turn. Our replies are not free
+                            # (Claude call + difficulty scoring), and a discarded
+                            # speculation would still advance the question count.
+                            "speculative_inference": False,
+                        },
+                    },
+                },
+            ) as response:
+                data = await response.json()
+                if response.status >= 400:
+                    print(f"Tavus PAL creation failed ({response.status}): {data}")
+                    return None
+                self.tavus_pal_id = data.get("pal_id")
+                print(
+                    f"Created Tavus PAL {self.tavus_pal_id} - "
+                    f"set TAVUS_PAL_ID={self.tavus_pal_id} in server/.env to reuse it"
+                )
+                return self.tavus_pal_id
+        except Exception as e:
+            print(f"Error creating Tavus PAL: {e}")
+            return None
+
+    async def create_tavus_conversation(
+        self,
+        session_id: str,
+        greeting: Optional[str] = None,
+    ) -> Optional[Dict[str, str]]:
+        """Create Tavus avatar conversation.
+
+        Returns {"url": ..., "conversation_id": ...} or None.
+        """
+        if not self.tavus_client or not config.api.tavus_face_id:
+            return None
+
+        pal_id = await self.ensure_tavus_pal()
+        if not pal_id:
+            return None
+
         try:
             payload = {
-                "replica_id": config.api.tavus_replica_id,
-                "conversational_context": f"""You are conducting a technical interview. 
-                Here is the candidate analysis: {resume_analysis[:500]}"""
+                # Tavus v2 takes pal_id + face_id; replica_id/persona_id are
+                # the retired names and reject current ids.
+                "pal_id": pal_id,
+                "face_id": config.api.tavus_face_id,
+                "conversation_name": f"git-hired-{session_id[:8]}",
+                # Tavus replays this context in the system message it sends to
+                # our LLM endpoint, which is how a request gets matched back to
+                # its interview - there is no per-conversation LLM config.
+                "conversational_context": f"[{SESSION_MARKER} {session_id}]",
+                # The agent's own opening line, so the first thing the
+                # candidate hears is already part of the interview.
+                "custom_greeting": greeting or "Hello! Thanks for joining today.",
             }
-            
+
             async with self.tavus_client.post(
                 "https://tavusapi.com/v2/conversations",
                 json=payload
             ) as response:
                 data = await response.json()
-                conversation_url = data.get("conversation_url")
-                self.sessions[session_id]["tavus_conversation_id"] = data.get("conversation_id")
-                return conversation_url
+                if response.status >= 400:
+                    # Typical causes: bad key, unknown face/PAL id, out of
+                    # credits. Surface the reason instead of a silent None.
+                    print(f"Tavus conversation failed ({response.status}): {data}")
+                    return None
+                conversation_id = data.get("conversation_id")
+                self.sessions[session_id]["tavus_conversation_id"] = conversation_id
+                return {
+                    "url": data.get("conversation_url"),
+                    "conversation_id": conversation_id,
+                }
         except Exception as e:
             print(f"Error creating Tavus conversation: {e}")
             return None
+
+    async def end_tavus_conversation(self, session_id: str):
+        """End the session's Tavus conversation so it stops consuming credits.
+
+        Without this the conversation keeps running server-side at Tavus until
+        its idle timeout, long after the candidate has left.
+        """
+        session = self.sessions.get(session_id) or {}
+        conversation_id = session.get("tavus_conversation_id")
+        if not self.tavus_client or not conversation_id:
+            return
+
+        try:
+            async with self.tavus_client.post(
+                f"https://tavusapi.com/v2/conversations/{conversation_id}/end"
+            ) as response:
+                if response.status >= 400:
+                    body = await response.text()
+                    print(f"Tavus end-conversation failed ({response.status}): {body}")
+                else:
+                    print(f"Ended Tavus conversation {conversation_id}")
+        except Exception as e:
+            print(f"Error ending Tavus conversation: {e}")
     
     async def close_tavus(self):
         """Close Tavus client"""
@@ -213,6 +350,27 @@ class SessionManager:
 
 # Global session manager
 session_manager = SessionManager()
+
+
+async def notify_session(session_id: Optional[str], payload: Dict[str, Any]):
+    """Push an event to the browser over the session's control WebSocket.
+
+    With Tavus running the voice pipeline, questions reach the candidate as
+    speech rather than through our socket, so this channel is what keeps the
+    on-screen transcript and the code editor in step with the conversation.
+    Best-effort: a candidate with no socket attached still gets the interview.
+    """
+    if not session_id:
+        return
+    session = session_manager.get_session(session_id)
+    websocket = (session or {}).get("control_ws")
+    if not websocket:
+        return
+    try:
+        await websocket.send_json(payload)
+    except Exception as e:
+        print(f"Control channel send failed for {session_id}: {e}")
+        session["control_ws"] = None
 
 
 @app.on_event("startup")
@@ -337,6 +495,150 @@ async def health_check():
     }
 
 
+# ---------------------------------------------------------------------------
+# OpenAI-compatible endpoint that Tavus calls as its "LLM"
+#
+# This is the hinge of the live-conversation design. Tavus owns the voice
+# pipeline - microphone, sparrow-1 turn detection, barge-in - and whenever the
+# candidate finishes a thought it POSTs the conversation here. We ignore the
+# model it asks for and return whatever InterviewerAgent decides to say next,
+# so adaptive difficulty and the coding-question flow still come from this
+# repo. Tavus then speaks the reply through the avatar with lip-sync.
+#
+# It is internet-facing (Tavus has to reach it), hence the bearer check.
+# ---------------------------------------------------------------------------
+
+# Lets us map an inbound Tavus request back to the interview it belongs to.
+# Tavus has no per-conversation LLM config, so the id rides along inside the
+# conversational context, which it replays to us in the system message.
+SESSION_MARKER = "git-hired-session:"
+
+
+def _extract_session_id(messages: list) -> Optional[str]:
+    """Recover our session id from the marker Tavus echoes back."""
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, str) or SESSION_MARKER not in content:
+            continue
+        after = content.split(SESSION_MARKER, 1)[1]
+        # The id is followed by a bracket/newline depending on where Tavus
+        # spliced the context in.
+        session_id = after.strip().split()[0].strip("]}\"',.")
+        if session_id:
+            return session_id
+    return None
+
+
+def _latest_candidate_message(messages: list) -> str:
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+    return ""
+
+
+def _sse_chunk(chunk_id: str, model: str, delta: dict, finish_reason=None) -> str:
+    payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _split_for_speech(text: str):
+    """Yield sentence-ish pieces.
+
+    Tavus starts speaking the first chunk it receives, so emitting whole
+    sentences rather than one blob shortens the silence before the avatar
+    replies, without chopping words mid-phrase.
+    """
+    buffer = ""
+    for char in text:
+        buffer += char
+        if char in ".!?\n" and len(buffer.strip()) > 12:
+            yield buffer
+            buffer = ""
+    if buffer.strip():
+        yield buffer
+
+
+@app.post("/v1/chat/completions")
+async def tavus_llm_completions(request: Request):
+    """Serve Tavus the next interviewer line, in OpenAI's response shape."""
+    expected = config.api.tavus_llm_api_key
+    provided = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if not expected or provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    body = await request.json()
+    messages = body.get("messages") or []
+    model = body.get("model") or "git-hired-interviewer"
+    stream = bool(body.get("stream", True))
+
+    session_id = _extract_session_id(messages)
+    session = session_manager.get_session(session_id) if session_id else None
+    if not session:
+        print(f"⚠️  Tavus LLM call for unknown session: {session_id!r}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    interviewer = session["interviewer_agent"]
+    candidate_response = _latest_candidate_message(messages)
+
+    # get_next_question does blocking HTTP to Anthropic; keep the event loop
+    # free so other sessions' audio/websockets are not stalled behind it.
+    result = await asyncio.to_thread(interviewer.get_next_question, candidate_response)
+    reply = result["question"]
+
+    if result.get("is_coding_question"):
+        session["coding_question"] = reply
+        # The question reaches the candidate as speech through Tavus, so the
+        # editor has to be opened over our own control channel.
+        await notify_session(session_id, {
+            "type": "coding_question",
+            "content": reply,
+            "question_number": result.get("question_number"),
+        })
+
+    await notify_session(session_id, {
+        "type": "question",
+        "content": reply,
+        "question_number": result.get("question_number"),
+        "difficulty_level": result.get("difficulty_level"),
+    })
+
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+
+    if not stream:
+        return JSONResponse({
+            "id": chunk_id,
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": reply},
+                "finish_reason": "stop",
+            }],
+        })
+
+    async def event_stream():
+        yield _sse_chunk(chunk_id, model, {"role": "assistant", "content": ""})
+        for piece in _split_for_speech(reply):
+            yield _sse_chunk(chunk_id, model, {"content": piece})
+        yield _sse_chunk(chunk_id, model, {}, finish_reason="stop")
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/session/init", response_model=SessionInitResponse)
 async def initialize_session(request: SessionInitRequest):
     """
@@ -397,12 +699,21 @@ async def initialize_session(request: SessionInitRequest):
         
         # Step 4: Initialize Avatar (if enabled)
         avatar_url = None
+        avatar_conversation_id = None
         if config.enable_avatar:
             print("Step 4/4: Initializing avatar...")
-            avatar_url = await session_manager.create_tavus_conversation(
-                session_id, resume_analysis
+            # Generate the opening now and hand it to Tavus as the greeting:
+            # the avatar then opens the interview itself the moment the
+            # candidate joins, with no "Start Interview" round trip.
+            opening = await asyncio.to_thread(interviewer_agent.start_interview)
+            session["opening"] = opening
+            avatar = await session_manager.create_tavus_conversation(
+                session_id, greeting=opening
             )
-        
+            if avatar:
+                avatar_url = avatar["url"]
+                avatar_conversation_id = avatar["conversation_id"]
+
         print(f"✅ Session initialized for {candidate_name}: {session_id}\n")
 
         return SessionInitResponse(
@@ -410,6 +721,7 @@ async def initialize_session(request: SessionInitRequest):
             status="ready",
             message="Interview session initialized successfully",
             avatar_url=avatar_url,
+            avatar_conversation_id=avatar_conversation_id,
             candidate_name=candidate_name,
             candidate_first_name=candidate_first_name
         )
@@ -429,10 +741,16 @@ async def start_interview(session_id: str):
         session = session_manager.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        
-        interviewer = session["interviewer_agent"]
-        opening = interviewer.start_interview()
-        
+
+        # When the avatar is live the opening was generated at session init and
+        # handed to Tavus as the greeting; regenerating it here would both cost
+        # an extra model call and desync from what the candidate actually heard.
+        opening = session.get("opening")
+        if not opening:
+            interviewer = session["interviewer_agent"]
+            opening = await asyncio.to_thread(interviewer.start_interview)
+            session["opening"] = opening
+
         return {
             "session_id": session_id,
             "opening": opening,
@@ -524,10 +842,14 @@ async def end_interview(request: EndInterviewRequest):
             raise HTTPException(status_code=404, detail="Session not found")
         
         interviewer = session["interviewer_agent"]
-        
+
         # End interview
         closing = interviewer.end_interview()
-        
+
+        # Stop the avatar conversation before the slow report generation, so
+        # it is not left running at Tavus while the report is written.
+        await session_manager.end_tavus_conversation(request.session_id)
+
         # Save transcript
         interviewer.save_transcript(request.session_id)
         
@@ -563,16 +885,22 @@ async def end_interview(request: EndInterviewRequest):
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """
-    WebSocket endpoint for real-time interview communication
+    WebSocket endpoint for real-time interview communication.
+
+    Doubles as the control channel: when Tavus is driving the voice, the
+    server pushes questions and coding prompts down this socket so the UI
+    can follow along (see notify_session).
     """
     await websocket.accept()
-    
+
     session = session_manager.get_session(session_id)
     if not session:
         await websocket.send_json({"error": "Session not found"})
         await websocket.close()
         return
-    
+
+    session["control_ws"] = websocket
+
     try:
         while True:
             # Receive message from client
@@ -608,25 +936,67 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         print(f"WebSocket disconnected: {session_id}")
     except Exception as e:
         print(f"WebSocket error: {e}")
-        await websocket.send_json({"error": str(e)})
+        try:
+            await websocket.send_json({"error": str(e)})
+        except Exception:
+            # Socket already gone; nothing useful left to report to the client.
+            pass
+    finally:
+        if session.get("control_ws") is websocket:
+            session["control_ws"] = None
 
 
 if __name__ == "__main__":
+    import socket
     import uvicorn
-    
+
+    host = config.server.host
+    port = config.server.port
+    # 0.0.0.0 is a bind address, not something you can browse to.
+    display_host = "localhost" if host in ("0.0.0.0", "127.0.0.1", "::") else host
+
     print("\n" + "="*80)
     print("Starting AI Interviewer Backend Server")
     print("="*80)
     print("\nServer will be available at:")
-    print("  - HTTP: http://localhost:8000")
-    print("  - WebSocket: ws://localhost:8000/ws")
-    print("  - API Docs: http://localhost:8000/docs")
+    print(f"  - HTTP: http://{display_host}:{port}")
+    print(f"  - WebSocket: ws://{display_host}:{port}/ws")
+    print(f"  - API Docs: http://{display_host}:{port}/docs")
     print("\nPress Ctrl+C to stop\n")
-    
+
+    # Bind once up front so an unavailable port produces an explanation rather
+    # than a bare WinError 10013 / EADDRINUSE from deep inside uvicorn.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError as exc:
+        print(f"\nError: cannot bind {host}:{port} - {exc}\n")
+        print(f"  Something else is already using port {port}. Either stop it or")
+        print(f"  pick another port by setting PORT in server/.env, e.g. PORT={port + 1}")
+        print("\n  Find the culprit:")
+        print(f"    Windows:     netstat -ano | findstr :{port}")
+        print(f"    macOS/Linux: lsof -i :{port}")
+        print("\n  If you change PORT, point the frontend at it too - set")
+        print("  VITE_API_BASE_URL in agentic-interviewer/.env.local\n")
+        sys.exit(1)
+    finally:
+        probe.close()
+
+    # reload=True re-imports the app by name, which only resolves if this
+    # directory is importable - it is not when launched from the repo root.
     uvicorn.run(
         "server:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
+        host=host,
+        port=port,
+        reload=config.server.reload,
+        # Watch the source directories only. Pointing this at SERVER_DIR would
+        # also cover logs/ and reports/, which the app writes to while running.
+        reload_dirs=[
+            str(BACKEND_DIR),
+            str(SERVER_DIR / "agents"),
+            str(SERVER_DIR / "config"),
+            str(SERVER_DIR / "prompts"),
+        ],
+        app_dir=str(BACKEND_DIR),
         log_level="info"
     )
