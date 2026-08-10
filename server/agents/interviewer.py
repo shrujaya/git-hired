@@ -6,6 +6,7 @@ Conducts adaptive technical interviews with AI avatar
 import anthropic
 from typing import Dict, Any, List, Optional
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -64,13 +65,21 @@ class InterviewerAgent:
             candidate_first_name=self.candidate_first_name
         )
         
+        # The opening is spoken aloud before the candidate can say anything, so
+        # a long one is a monologue they have to sit through. Same tight budget
+        # as every other turn.
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=config.interview.max_tokens,
+            max_tokens=config.interview.reply_max_tokens,
+            output_config={"effort": config.interview.reply_effort},
             system=system_prompt,
             messages=[{
                 "role": "user",
-                "content": "Please start the interview with your opening statement and first question."
+                "content": (
+                    "Start the interview. Greet them in one short sentence, then "
+                    "ask your first question. Two or three sentences in total - "
+                    "this is spoken aloud, so no preamble about the format."
+                )
             }]
         )
         
@@ -122,6 +131,22 @@ class InterviewerAgent:
         except:
             return 50  # Default to middle if parsing fails
     
+    def _score_in_background(self, question: str, response: str):
+        """Score an answer off the critical path and apply it when it lands."""
+        def run():
+            try:
+                score = self.evaluate_response_quality(question, response)
+            except Exception as e:
+                print(f"Response scoring failed: {e}")
+                return
+            # Appended from a worker thread; both operations are single
+            # bytecode-level mutations of interpreter-owned objects, and the
+            # only reader is the next question's prompt, so no lock is needed.
+            self.response_scores.append(score)
+            self.adjust_difficulty(score)
+
+        threading.Thread(target=run, daemon=True).start()
+
     def adjust_difficulty(self, response_score: int):
         """
         Adjust interview difficulty based on response quality
@@ -155,13 +180,18 @@ class InterviewerAgent:
             "content": candidate_response
         })
         
-        # Evaluate response quality
+        # Evaluate response quality.
+        #
+        # Scored in the background: this is a second Claude round trip, and
+        # running it inline doubled the silence the candidate hears before the
+        # interviewer speaks. The score only feeds difficulty for *later*
+        # questions, so it does not have to land before this one is asked - it
+        # is applied as soon as it arrives.
         if len(self.transcript) > 0:
             last_question = self.transcript[-1].get("interviewer", "")
-            score = self.evaluate_response_quality(last_question, candidate_response)
-            self.response_scores.append(score)
-            self.adjust_difficulty(score)
-        
+            self._score_in_background(last_question, candidate_response)
+
+
         # Calculate time elapsed
         time_elapsed = 0
         if self.start_time:
@@ -198,10 +228,18 @@ class InterviewerAgent:
             user_message = """Now ask a coding question. State the problem clearly, specify input/output format, and tell the candidate to type their solution in the coding editor. Keep the problem description concise for voice communication."""
             self.coding_question_asked = True
         
-        # Get next question
+        # Get next question.
+        #
+        # This call is on the critical path of a live conversation: the
+        # candidate is sitting in silence until it returns. Two settings keep
+        # it fast. A spoken turn is 2-4 sentences, so the 8192-token budget
+        # used for reports is wasted headroom - and adaptive thinking expands
+        # to fill whatever it is given. "low" effort is the documented setting
+        # for short, scoped, latency-sensitive work.
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=config.interview.max_tokens,
+            max_tokens=config.interview.reply_max_tokens,
+            output_config={"effort": config.interview.reply_effort},
             system=system_prompt,
             messages=self.conversation_history + [{
                 "role": "user",

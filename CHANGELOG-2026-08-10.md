@@ -2,16 +2,22 @@
 
 **Baseline:** [`2f346e3`](https://github.com/shrujaya/git-hired/commit/2f346e37174a03c38a1b6e725dc44778e8142f59)
 — *"feat: add setup script and environment configuration…"* (Shruti Jayaraman, 2026-08-09)
-**Branch:** `v2.0` · **Date:** 2026-08-10 · **Author:** Claude Code session (uncommitted working tree)
+**Branch:** `v2.0` · **Date:** 2026-08-10
 
-Everything below is **uncommitted** at the time of writing. `git diff` against
-`2f346e3` reproduces it exactly.
+The work landed in two batches:
+
+| Batch | Contents | State |
+| --- | --- | --- |
+| **1** | Cross-platform setup, Tavus API migration, live conversation (§1–5) | Committed as [`7eca195`](https://github.com/shrujaya/git-hired/commit/7eca195) |
+| **2** | Interview-page redesign, working device controls, conversation-quality fixes (§6–7) | Uncommitted working tree |
+
+`git diff 2f346e3` reproduces both batches together.
 
 ---
 
 ## TL;DR for the next person
 
-Three things happened, in order, each triggered by the previous one failing:
+Five things happened, each triggered by the previous one failing:
 
 1. **The repo did not run on Windows.** Fixed the setup/run scripts, the venv
    layout assumption, a console crash, and CWD-dependent config.
@@ -21,8 +27,13 @@ Three things happened, in order, each triggered by the previous one failing:
 3. **The interview had a push-to-talk button.** Replaced with Tavus's real
    turn-taking, which required inverting the integration: Tavus now calls *into*
    this backend as its LLM.
+4. **The interview page didn't look like a call.** Rebuilt as a meeting-app
+   layout; mic and camera became real controls.
+5. **The live conversation didn't feel human.** Long silences between turns, a
+   monologue opening, and the coding question firing after one answer — all
+   traced to concrete causes and fixed (§7).
 
-**If you only read one thing:** the backend now needs a **public URL**
+**If you only read one thing:** the backend needs a **public URL**
 (`TAVUS_LLM_BASE_URL`) for the avatar to work at all. Locally that means running
 a tunnel. See [Live conversation setup](README.md#live-conversation-setup).
 
@@ -260,6 +271,104 @@ curl -X POST https://<tunnel-host>/v1/chat/completions \
 
 ---
 
+## 6. Interview page rebuilt as a meeting app
+
+*(Batch 2 — uncommitted)*
+
+The page was a light-blue three-card dashboard. It is now a video-call layout:
+full-bleed dark shell, the interviewer as the main stage, the candidate's own
+camera bottom-right over it, a control bar, and a right-hand panel.
+
+- **Full-bleed** — the old shell was capped at `max-w-[1560px]` with page
+  padding, leaving a grey border around the app.
+- **Self-view** sits bottom-right at `w-56 → w-64 → w-80`, with its ring
+  encoding state: green while you speak, amber if your face leaves frame, red
+  when the camera is off. The mic level is overlaid inside it.
+- **Side panel** replaces the old chat box: a **Transcript** tab (conversation
+  bubbles built from real speech events) and a **Code** tab that stays disabled
+  until a coding question is actually asked — at which point the panel opens and
+  switches itself.
+- **Removed by request:** the Mute and Interject buttons that had been added
+  alongside the avatar card.
+
+### Mic and camera are real controls now
+
+They started as status indicators. Making them work exposed a trap worth
+knowing: **there are two separate audio captures.** `getUserMedia` feeds the
+level meter and the face-tracking frames, while Daily runs its *own* microphone
+capture for what Tavus actually hears. Muting only the local track would look
+muted while the interviewer kept listening — a bad failure in an interview. So
+`handleToggleMic` disables the local track **and** calls `avatar.setMic(false)`.
+
+The hook's `toggleMic()` became `setMic(enabled)` plus an intent ref, so a mute
+chosen while the avatar is still connecting is re-applied on join instead of
+being silently reset.
+
+Camera-off also had to stop the face-tracking frames: black frames are scored by
+the backend as "candidate left the frame". `captureAndSendFrame` now reads the
+track's live `enabled` state rather than React state, because it runs inside a
+`setInterval` closure that would otherwise see a stale value.
+
+---
+
+## 7. Making the conversation feel human
+
+*(Batch 2 — uncommitted)*
+
+Four complaints from the first live run, each with a distinct cause.
+
+### Multi-second delay between turns → **measured 4.6s to 2.1s**
+
+Not one slow call — **two sequential Claude calls per turn**. Every answer ran
+`evaluate_response_quality` (1.9s) and *then* `get_next_question` (2.7s), with
+the candidate sitting in silence through both.
+
+- **Scoring moved off the critical path.** It only feeds difficulty for *later*
+  questions, so it never had to land before the current one is asked. It now
+  runs in a daemon thread and applies when it arrives.
+- **`max_tokens` 8192 → 1024 + `effort: "low"`** for conversational turns.
+  A spoken turn is 2–4 sentences; the 8192 budget exists for report generation,
+  and adaptive thinking expands to fill whatever headroom it is given. Report
+  generation keeps the large budget.
+
+### Coding question after a single answer
+
+**Tavus calls `/v1/chat/completions` more than once per candidate turn** — a
+retry, plus an opening call carrying no answer yet — and every call advanced
+`current_question_num`. Four calls reached the coding gate (`warmup + 2`) after
+one real answer, and billed a Claude call each time.
+
+The endpoint is now **idempotent per answer**: an empty call holds the floor
+without consuming a question, and a repeated answer replays the cached reply
+instead of advancing. UI events (transcript push, code-editor open) only fire on
+a genuinely fresh turn.
+
+### Opening was a long unstoppable monologue
+
+Two causes: the 8192-token budget, and
+[`agent_prompts.py`](server/prompts/agent_prompts.py) literally prescribing the
+preamble ("No trick questions… take your time"). Both fixed — the template now
+says that preamble *is* the monologue problem.
+
+Measured: **~110 words (~45s spoken) → 41 words (~16s)**.
+`TAVUS_INTERRUPTIBILITY=high` so the avatar yields the moment you speak, and
+`TAVUS_IDLE_ENGAGEMENT=off` so it waits through a thinking pause.
+
+### Transcript only showed the first message
+
+The opening is seeded from `/api/interview/start`; everything after depends on
+Tavus `conversation.utterance` events, which were not being read.
+
+> ⚠️ **This fix is defensive, not confirmed.** The Tavus event-schema pages do
+> not return their JSON payloads through WebFetch (three URLs tried), so the
+> exact transcript key is unverified. The hook reads
+> `properties.speech ?? text ?? transcript ?? content` and the speaker from
+> `role ?? speaker`, and **logs any unreadable utterance and any unhandled
+> event type to the console** under `[avatar]`. If the transcript is still empty,
+> those log lines name the real field — pin it and delete the fallbacks.
+
+---
+
 ## New environment variables
 
 All in [`server/.env.example`](server/.env.example).
@@ -273,9 +382,11 @@ All in [`server/.env.example`](server/.env.example).
 | `TAVUS_LLM_BASE_URL` | *(blank)* | **Required for avatar.** Public URL Tavus calls |
 | `TAVUS_LLM_API_KEY` | *(blank)* | **Required for avatar.** Guards the internet-facing endpoint |
 | `TAVUS_TURN_TAKING_PATIENCE` | `high` | `high` waits through thinking pauses |
-| `TAVUS_INTERRUPTIBILITY` | `medium` | How readily the avatar yields when talked over |
+| `TAVUS_INTERRUPTIBILITY` | `medium` | How readily the avatar yields when talked over (local `.env` runs `high`) |
 | `TAVUS_IDLE_ENGAGEMENT` | `off` | `off` never prompts during silence |
 | `TAVUS_VOICE_ISOLATION` | `near` | Background-noise filtering |
+| `REPLY_MAX_TOKENS` | `1024` | Budget for **one spoken turn** — reports keep the 8192 budget |
+| `REPLY_EFFORT` | `low` | Effort for conversational turns; the main latency lever |
 
 Frontend: `VITE_API_BASE_URL` in `agentic-interviewer/.env.local`.
 
@@ -297,10 +408,17 @@ into the PAL at creation.
 | [`agentic-interviewer/src/hooks/useTavusAvatar.ts`](agentic-interviewer/src/hooks/useTavusAvatar.ts) | Live avatar conversation |
 | [`agentic-interviewer/.env.example`](agentic-interviewer/.env.example) | Frontend env template |
 
-**Modified** — `server/backend/server.py` (+411/−41), `server/config/settings.py`,
+**Modified (batch 1)** — `server/backend/server.py`, `server/config/settings.py`,
 `server/agents/report_generator.py` (missing `encoding='utf-8'` on a transcript
 read — would break on Windows with accented names), `setup.sh`, `README.md`,
-`.gitignore`, and the frontend pages/types/utils listed in `git status`.
+`.gitignore`, and the frontend pages/types/utils.
+
+**Modified (batch 2)** — `InterviewPage.tsx` (+935/−… — the layout rebuild),
+`useTavusAvatar.ts` (device control + defensive utterance parsing),
+`server/backend/server.py` (turn idempotency + timing logs),
+`server/agents/interviewer.py` (background scoring, reply budget),
+`server/config/settings.py` (`REPLY_*`), `server/prompts/agent_prompts.py`
+(opening template), `README.md` (cloudflared install + tunnel health check).
 
 ---
 
@@ -316,20 +434,34 @@ read — would break on Windows with accented names), `setup.sh`, `README.md`,
   `/v1/chat/completions` → `404` with a valid key (auth passed), `401` without.
 - Both setup scripts run clean; backend serves `/health`, `/`, `/docs`;
   `tsc --noEmit` clean; production build passes.
+- **Tunnel install verified**: `cloudflared` installed via winget and a quick
+  tunnel proven to reach the backend from the public internet.
 
-**Not verified:** the live in-browser call — it needs a real microphone,
-camera permissions, and a running tunnel. Every layer beneath it is verified,
-so residual risk is mostly *tuning* (`TAVUS_TURN_TAKING_PATIENCE` /
-`TAVUS_INTERRUPTIBILITY`) rather than plumbing.
+**Batch 2:**
+
+- **7/7 turn-idempotency tests** (stubbed agent): an empty call consumes no
+  question, a repeated answer replays rather than re-asks, and the coding
+  question lands on the 4th answer instead of the 1st.
+- **Latency measured against the live Anthropic key**: scoring call 1.9s,
+  reply 2.7s → 2.1s. Total blocking work per turn 4.6s → 2.1s.
+- **Opening length measured**: 41 words / ~16s spoken (was ~110 words / ~45s).
+- `tsc --noEmit` clean; production build passes; Vite transforms both changed
+  modules at runtime.
+
+**Not verified in either batch:** the live in-browser call — it needs a real
+microphone, camera permissions, and a running tunnel. In particular the
+**transcript field names are unconfirmed** (§7) and the rendered layout of §6
+was never seen in a browser from this session. Residual risk is mostly *tuning*
+and field naming rather than plumbing.
 
 ---
 
 ## Known issues / follow-ups
 
-1. **`server/src/logs/eye_tracking_log.jsonl` is tracked in git** and gained 96
-   lines of runtime data during testing. It is generated output and should be
-   `.gitignore`d and `git rm --cached`ed. *(Not done here — it would touch a file
-   others may have local changes to.)*
+1. **`server/src/logs/eye_tracking_log.jsonl` is tracked in git** and has now
+   been *committed* with ~160 lines of runtime test data (96 in `7eca195`, ~63
+   more uncommitted). It is generated output: `.gitignore` it and
+   `git rm --cached` it. Every test run dirties the working tree until then.
 2. **`server/.env` contains live secrets.** It is correctly gitignored, but the
    Anthropic and Tavus keys in it have been visible in a working session — rotate
    if that concerns you. `server/.env.example` is the shareable template.
@@ -343,6 +475,15 @@ so residual risk is mostly *tuning* (`TAVUS_TURN_TAKING_PATIENCE` /
    Consider `manualChunks` or a dynamic import if it matters.
 6. **`/api/interview/message`** (the old REST turn endpoint) is now unused when
    the avatar is live. Left in place for the fallback path.
+7. **Transcript field names unconfirmed** (§7) — the hook reads four candidate
+   keys and logs what it cannot parse. First person to run a live interview:
+   check the console for `[avatar]` lines, pin the real key, drop the fallbacks.
+8. **Side panel is `hidden md:flex`** — below ~768px it disappears rather than
+   squashing the video. An overlay drawer would be the fix if mobile matters.
+9. **Difficulty scoring is now asynchronous** (§7). A score can land after the
+   next question was already chosen, so adaptation lags by up to one turn. That
+   is the deliberate trade for halving the silence; if strict ordering ever
+   matters, await the score for the *following* question rather than inline.
 
 ---
 

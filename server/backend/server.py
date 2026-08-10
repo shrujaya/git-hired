@@ -588,12 +588,42 @@ async def tavus_llm_completions(request: Request):
     interviewer = session["interviewer_agent"]
     candidate_response = _latest_candidate_message(messages)
 
-    # get_next_question does blocking HTTP to Anthropic; keep the event loop
-    # free so other sessions' audio/websockets are not stalled behind it.
-    result = await asyncio.to_thread(interviewer.get_next_question, candidate_response)
-    reply = result["question"]
+    # Tavus can call this more than once for the same candidate turn (a retry,
+    # or an opening call carrying no answer yet). Every call used to advance
+    # the question counter, which is what made the interview jump to the coding
+    # question after a single answer - and it billed a Claude call each time.
+    # Replay the previous reply instead of advancing.
+    fresh_turn = False
+    previous = session.get("last_answered")
+    if previous is not None and candidate_response == previous:
+        reply = session.get("last_reply", "")
+        result = session.get("last_result", {})
+        print(f"↩️  Replaying reply for duplicate turn (session {session_id[:8]})")
+    elif not candidate_response:
+        # No answer to respond to yet: hold the floor without consuming a
+        # question. The opening was already spoken as the Tavus greeting.
+        reply = session.get("last_reply") or session.get("opening") or (
+            "Take your time - whenever you're ready."
+        )
+        result = session.get("last_result", {})
+    else:
+        # get_next_question does blocking HTTP to Anthropic; keep the event
+        # loop free so other sessions' audio/websockets are not stalled behind it.
+        started = time.time()
+        result = await asyncio.to_thread(interviewer.get_next_question, candidate_response)
+        reply = result["question"]
+        print(
+            f"🗣️  Q{result.get('question_number')} in {time.time() - started:.1f}s "
+            f"(session {session_id[:8]})"
+        )
+        session["last_answered"] = candidate_response
+        session["last_reply"] = reply
+        session["last_result"] = result
+        fresh_turn = True
 
-    if result.get("is_coding_question"):
+    # Only push UI events for a genuinely new turn: a replayed reply would
+    # otherwise duplicate the transcript entry and re-open the code editor.
+    if fresh_turn and result.get("is_coding_question"):
         session["coding_question"] = reply
         # The question reaches the candidate as speech through Tavus, so the
         # editor has to be opened over our own control channel.
@@ -603,12 +633,13 @@ async def tavus_llm_completions(request: Request):
             "question_number": result.get("question_number"),
         })
 
-    await notify_session(session_id, {
-        "type": "question",
-        "content": reply,
-        "question_number": result.get("question_number"),
-        "difficulty_level": result.get("difficulty_level"),
-    })
+    if fresh_turn:
+        await notify_session(session_id, {
+            "type": "question",
+            "content": reply,
+            "question_number": result.get("question_number"),
+            "difficulty_level": result.get("difficulty_level"),
+        })
 
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 

@@ -160,6 +160,20 @@ class InterviewConfig(BaseModel):
     # response text together, so this needs more headroom than a non-thinking model.
     max_tokens: int = Field(default=8192, description="Max tokens per response")
 
+    # A spoken interview turn is 2-4 sentences. The generous budget above is for
+    # reports; using it for conversation buys nothing and costs seconds, because
+    # adaptive thinking expands to fill the headroom it is given.
+    reply_max_tokens: int = Field(
+        default_factory=lambda: env_int("REPLY_MAX_TOKENS", 1024),
+        description="Max tokens for a single spoken interview turn"
+    )
+    # "low" is the documented setting for short, scoped, latency-sensitive work,
+    # which is exactly what one interview question is.
+    reply_effort: str = Field(
+        default_factory=lambda: os.getenv("REPLY_EFFORT", "low"),
+        description="Effort level for conversational turns (low|medium|high)"
+    )
+
 class EmailConfig(BaseModel):
     """Email Configuration"""
     smtp_server: str = Field(

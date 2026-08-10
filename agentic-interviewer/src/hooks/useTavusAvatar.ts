@@ -41,7 +41,8 @@ interface TavusAvatar {
   /** Live partial transcription of the candidate's current sentence. */
   interimSpeech: string;
   micEnabled: boolean;
-  toggleMic: () => void;
+  /** Publish or stop publishing the candidate's mic to the avatar. */
+  setMic: (enabled: boolean) => void;
   /** Cut the avatar off, e.g. when the candidate clicks to interject. */
   interrupt: () => void;
 }
@@ -60,6 +61,8 @@ export const useTavusAvatar = (
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [interimSpeech, setInterimSpeech] = useState("");
   const [micEnabled, setMicEnabled] = useState(true);
+  // Survives the join: applied once the call object exists.
+  const micIntentRef = useRef(true);
 
   // Kept in a ref so changing the callback never tears down the call.
   const onUtteranceRef = useRef(options.onUtterance);
@@ -111,10 +114,16 @@ export const useTavusAvatar = (
 
       call.on("app-message", (ev: DailyEventObjectAppMessage) => {
         const data = ev.data ?? {};
+        const props = data.properties ?? {};
         // Tavus reports the speaker via properties.role; "replica" is the
         // pre-rename value and still appears, so accept both.
-        const role = data.properties?.role;
+        const role = props.role ?? props.speaker;
         const isPal = role === "pal" || role === "replica";
+        // The transcript field has been spelled several ways across Tavus
+        // versions. Read every shape rather than betting on one — a wrong
+        // guess here shows up as a silently empty transcript.
+        const spoken: string =
+          props.speech ?? props.text ?? props.transcript ?? props.content ?? "";
 
         switch (data.event_type) {
           case "conversation.started_speaking":
@@ -129,17 +138,23 @@ export const useTavusAvatar = (
 
           case "conversation.utterance.streaming":
             // Partial candidate speech, shown live then replaced by the final.
-            if (!isPal) setInterimSpeech(data.properties?.text ?? "");
+            if (!isPal) setInterimSpeech(spoken);
             break;
 
           case "conversation.utterance": {
-            const text = (data.properties?.text ?? "").trim();
+            const text = spoken.trim();
             if (!isPal) setInterimSpeech("");
             if (text) {
               onUtteranceRef.current?.({
                 role: isPal ? "interviewer" : "candidate",
                 text,
               });
+            } else {
+              console.warn(
+                "[avatar] utterance had no readable text; payload keys:",
+                Object.keys(props),
+                data
+              );
             }
             break;
           }
@@ -152,12 +167,22 @@ export const useTavusAvatar = (
           case "conversation.replica.stopped_speaking":
             setReplicaSpeaking(false);
             break;
+
+          default:
+            // The transcript depends on event names we cannot fully verify
+            // from the docs. Log the ones we ignore so a rename is visible
+            // in the console instead of showing up as an empty transcript.
+            if (typeof data.event_type === "string") {
+              console.debug("[avatar] unhandled event:", data.event_type, data);
+            }
         }
       });
 
       call.on("joined-meeting", () => {
         setStatus("connected");
-        setMicEnabled(call.localAudio());
+        // Re-apply any mute chosen while the call was still connecting.
+        call.setLocalAudio(micIntentRef.current);
+        setMicEnabled(micIntentRef.current);
       });
       call.on("left-meeting", () => setStatus("error"));
       call.on("error", (ev) => {
@@ -192,12 +217,12 @@ export const useTavusAvatar = (
     };
   }, [conversationUrl]);
 
-  const toggleMic = useCallback(() => {
-    const call = callRef.current;
-    if (!call) return;
-    const next = !call.localAudio();
-    call.setLocalAudio(next);
-    setMicEnabled(next);
+  const setMic = useCallback((enabled: boolean) => {
+    setMicEnabled(enabled);
+    // Track the intent even before the call exists, so a mute chosen while
+    // still connecting is not silently undone once we join.
+    micIntentRef.current = enabled;
+    callRef.current?.setLocalAudio(enabled);
   }, []);
 
   const interrupt = useCallback(() => {
@@ -224,7 +249,7 @@ export const useTavusAvatar = (
     userSpeaking,
     interimSpeech,
     micEnabled,
-    toggleMic,
+    setMic,
     interrupt,
   };
 };

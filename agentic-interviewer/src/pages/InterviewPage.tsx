@@ -6,13 +6,20 @@ import { useTavusAvatar, type AvatarUtterance } from "../hooks/useTavusAvatar";
 import { apiUrl, wsUrl } from "../config";
 import {
   Video,
+  VideoOff,
   Mic,
+  MicOff,
   Code2,
   Send,
   Loader2,
   CheckCircle,
   AlertTriangle,
   Square,
+  PhoneOff,
+  MessageSquareText,
+  PanelRightClose,
+  PanelRightOpen,
+  X,
 } from "lucide-react";
 
 interface TranscriptEntry {
@@ -58,6 +65,30 @@ const InterviewPage: React.FC = () => {
   const [showCodeEditor, setShowCodeEditor] = useState(false);
   const [code, setCode] = useState("");
   const [isSubmittingCode, setIsSubmittingCode] = useState(false);
+
+  // Device toggles. Kept here rather than read off the avatar, so they work
+  // before (and without) a live Tavus call.
+  const [micOn, setMicOn] = useState(true);
+
+  // Side panel: transcript by default, code once a coding question is asked
+  const [sidePanelOpen, setSidePanelOpen] = useState(true);
+  const [activePanel, setActivePanel] = useState<"transcript" | "code">("transcript");
+
+  // Call timer, for the header readout
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const jobTitle = sessionStorage.getItem("jobTitle") || "Technical Interview";
+  const candidateFirstName = sessionStorage.getItem("candidateFirstName") || "You";
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
   // Speech synthesis
   const synthesis = window.speechSynthesis;
@@ -281,6 +312,14 @@ const InterviewPage: React.FC = () => {
   const captureAndSendFrame = () => {
     if (!videoRef.current || !canvasRef.current || !videoWsRef.current) return;
 
+    // Read the track's live state rather than React state: this runs from a
+    // setInterval closure that would otherwise see a stale value. With the
+    // camera off the frames are black, which the backend would score as the
+    // candidate having left the frame.
+    const videoTrack = (videoRef.current.srcObject as MediaStream | null)
+      ?.getVideoTracks()[0];
+    if (!videoTrack?.enabled) return;
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     const video = videoRef.current;
@@ -374,7 +413,11 @@ const InterviewPage: React.FC = () => {
     // question reaches the candidate as speech, so these exist to keep the UI
     // in step — opening the editor when a coding question is asked.
     if (data.type === "coding_question") {
+      // Surface the editor the moment the question is asked — the candidate
+      // hears it as speech, so nothing on screen would otherwise change.
       setShowCodeEditor(true);
+      setActivePanel("code");
+      setSidePanelOpen(true);
       return;
     }
 
@@ -405,6 +448,8 @@ const InterviewPage: React.FC = () => {
       // Check if it's a coding question
       if (data.is_coding_question) {
         setShowCodeEditor(true);
+        setActivePanel("code");
+        setSidePanelOpen(true);
         speak(question + " Please use the code editor to write your solution.");
       } else {
         speak(question);
@@ -622,30 +667,66 @@ const InterviewPage: React.FC = () => {
     navigate("/results");
   };
 
+
+  // ---- device controls ---------------------------------------------------
+  // Two separate captures are in play: `stream` (getUserMedia) drives the
+  // self-view, the audio meter and the face-tracking frames, while Daily runs
+  // its own microphone capture for what the interviewer actually hears.
+  // Muting has to cover both or the avatar keeps listening to a "muted" mic.
+  const handleToggleMic = () => {
+    const next = !micOn;
+    setMicOn(next);
+    stream?.getAudioTracks().forEach((track) => {
+      track.enabled = next;
+    });
+    avatar.setMic(next);
+    if (!next && recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+    }
+  };
+
+  // The camera is never published to Tavus (videoSource: false), so this is
+  // purely local: self-view plus the frames sent for face tracking.
+  const handleToggleCamera = () => {
+    const track = stream?.getVideoTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setCameraEnabled(track.enabled);
+  };
+
+  // ---- helpers for the meeting chrome ------------------------------------
+  const formatClock = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+  };
+
+  // Shared tile geometry, so the control bar stays visually even.
+  const tile =
+    "w-11 h-11 rounded-xl flex items-center justify-center transition-colors " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 " +
+    "focus-visible:ring-offset-2 focus-visible:ring-offset-[#111A24]";
+
+  const actionTile = tile + " bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white";
+  const activeTile = tile + " bg-blue-600 text-white hover:bg-blue-500";
+  // A device that is off is a state worth noticing, so it reads red.
+  const dangerTile = tile + " bg-red-600 text-white hover:bg-red-500";
+
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-blue-50 via-cyan-50 to-blue-100 relative">
+    <div className="h-screen w-screen overflow-hidden bg-[#111A24]">
       {/* Hidden canvas for video processing */}
       <canvas ref={canvasRef} width={640} height={480} className="hidden" />
 
-      {/* Exit Button */}
-      <button
-        onClick={() => setShowExitDialog(true)}
-        className="fixed top-3 right-3 z-50 bg-red-500/90 hover:bg-red-600 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-lg transition-all"
-      >
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-        </svg>
-        Exit Interview
-      </button>
-
-      {/* Fullscreen Warning */}
+      {/* Fullscreen warning */}
       {showWarning && (
-        <div className="fixed top-14 left-1/2 transform -translate-x-1/2 z-50 bg-yellow-500/95 backdrop-blur-sm text-white px-4 py-2 rounded-xl shadow-2xl animate-shake flex items-center gap-2 max-w-md">
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-white px-4 py-2.5 rounded-xl shadow-2xl animate-shake flex items-center gap-2.5 max-w-md">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           <div className="flex-1">
-            <p className="font-bold text-xs">Fullscreen Warning</p>
-            <p className="text-[10px] mt-0.5">
-              You exited fullscreen. This has been recorded. ({fullscreenExits} exit{fullscreenExits !== 1 ? "s" : ""})
+            <p className="font-bold text-xs">Fullscreen exited</p>
+            <p className="text-[10px] mt-0.5 text-white/90">
+              This has been recorded ({fullscreenExits} exit
+              {fullscreenExits !== 1 ? "s" : ""}).
             </p>
           </div>
           <button
@@ -653,25 +734,23 @@ const InterviewPage: React.FC = () => {
               enterFullscreen();
               setShowWarning(false);
             }}
-            className="ml-auto bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-[10px] font-medium transition-colors whitespace-nowrap"
+            className="bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors whitespace-nowrap"
           >
             Return
           </button>
         </div>
       )}
 
-      {/* Exit Dialog */}
+      {/* Exit dialog */}
       {showExitDialog && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
                 <AlertTriangle className="w-5 h-5 text-red-600" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-gray-900 mb-1">
-                  Exit Interview?
-                </h3>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">End interview?</h3>
                 <p className="text-xs text-gray-600">
                   Your progress will be saved and reviewed.
                 </p>
@@ -680,15 +759,13 @@ const InterviewPage: React.FC = () => {
 
             {(fullscreenExits > 0 || tabSwitches > 0) && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                <p className="text-xs font-semibold text-red-800 mb-1">
-                  Activity Summary:
-                </p>
+                <p className="text-xs font-semibold text-red-800 mb-1">Activity summary</p>
                 <ul className="text-[10px] text-red-700 space-y-0.5">
                   {fullscreenExits > 0 && (
-                    <li>• {fullscreenExits} fullscreen exit{fullscreenExits !== 1 ? "s" : ""}</li>
+                    <li>{fullscreenExits} fullscreen exit{fullscreenExits !== 1 ? "s" : ""}</li>
                   )}
                   {tabSwitches > 0 && (
-                    <li>• {tabSwitches} tab switch{tabSwitches !== 1 ? "es" : ""}</li>
+                    <li>{tabSwitches} tab switch{tabSwitches !== 1 ? "es" : ""}</li>
                   )}
                 </ul>
               </div>
@@ -705,402 +782,524 @@ const InterviewPage: React.FC = () => {
                 onClick={handleExitInterview}
                 className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors"
               >
-                Exit Interview
+                End interview
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="h-full w-full flex flex-col p-3 pt-14">
-        <div className="flex-1 flex gap-3 overflow-hidden">
-          {/* Left Side - Avatar & User Video */}
-          <div className="w-80 flex flex-col gap-3">
-            {/* AI Avatar Container */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl flex-shrink-0">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center">
-                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                </div>
-                <h3 className="text-sm font-bold text-gray-900">AI Interviewer</h3>
-                {interviewerSpeaking && (
-                  <div className="ml-auto flex items-center gap-1">
-                    <div className="w-1 h-3 bg-blue-500 rounded-full animate-pulse"></div>
-                    <div className="w-1 h-4 bg-blue-500 rounded-full animate-pulse animation-delay-100"></div>
-                    <div className="w-1 h-3 bg-blue-500 rounded-full animate-pulse animation-delay-200"></div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Tavus avatar video, or placeholder when unavailable */}
-              <div className="relative aspect-video bg-gradient-to-br from-blue-100 to-cyan-100 rounded-lg overflow-hidden flex items-center justify-center">
-                {avatar.status === "connected" && avatar.remoteStream ? (
-                  <video
-                    // Callback ref: the element mounts after the stream
-                    // arrives, so attach here as well as in the effect.
-                    ref={(el) => {
-                      avatarVideoRef.current = el;
-                      if (el && el.srcObject !== avatar.remoteStream) {
-                        el.srcObject = avatar.remoteStream;
-                      }
-                    }}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
+      {/* ===================== App shell ===================== */}
+      <div className="w-full h-full bg-[#111A24] flex flex-col overflow-hidden">
+
+        {/* ---- Header ---- */}
+        <header className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
+            <Video className="w-5 h-5 text-white" strokeWidth={2.2} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] leading-tight text-slate-400 truncate">{todayLabel}</p>
+            <h1 className="text-sm font-semibold text-white leading-tight truncate">
+              {jobTitle}
+            </h1>
+          </div>
+          <div className="ml-auto flex-shrink-0">
+            <span className="text-xs font-mono tabular-nums text-slate-300 bg-white/5 px-2.5 py-1.5 rounded-lg">
+              {formatClock(elapsed)}
+            </span>
+          </div>
+        </header>
+
+        {/* ---- Body ---- */}
+        <div className="flex-1 flex min-h-0 gap-3 px-3 pb-3">
+
+          {/* ============ Stage ============ */}
+          <div className="flex-1 flex flex-col min-w-0 gap-3">
+            <div className="relative flex-1 min-h-0 rounded-2xl overflow-hidden bg-slate-800">
+
+              {/* Interviewer video */}
+              {avatarLive && avatar.remoteStream ? (
+                <video
+                  // Callback ref: the element mounts after the stream arrives,
+                  // so attach here as well as in the effect.
+                  ref={(el) => {
+                    avatarVideoRef.current = el;
+                    if (el && el.srcObject !== avatar.remoteStream) {
+                      el.srcObject = avatar.remoteStream;
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900">
                   <div className="text-center">
-                    <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full mx-auto mb-2 flex items-center justify-center shadow-lg">
-                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
+                    <div className="w-24 h-24 rounded-full bg-white/10 mx-auto mb-4 flex items-center justify-center">
+                      {avatar.status === "connecting" ? (
+                        <Loader2 className="w-9 h-9 text-slate-300 animate-spin" />
+                      ) : (
+                        <svg className="w-11 h-11 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-600 font-medium">AI Avatar</p>
-                    <p className="text-[10px] text-gray-500">
-                      {avatar.status === "connecting" ? "Connecting…" : "Voice-only mode"}
+                    <p className="text-sm font-medium text-slate-200">
+                      {avatar.status === "connecting"
+                        ? "Connecting to your interviewer"
+                        : "AI Interviewer"}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {avatar.status === "connecting" ? "One moment" : "Voice-only mode"}
                     </p>
                   </div>
-                )}
-              </div>
-
-              {/* With the avatar live the interview starts on its own, so the
-                  only controls needed are mute and a way to cut it off. */}
-              {avatarLive ? (
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={avatar.toggleMic}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5 ${
-                      avatar.micEnabled
-                        ? "bg-white text-gray-800 hover:bg-gray-100 border border-gray-200"
-                        : "bg-red-600 text-white hover:bg-red-700"
-                    }`}
-                    title={avatar.micEnabled ? "Mute microphone" : "Unmute microphone"}
-                  >
-                    <Mic className="w-3.5 h-3.5" />
-                    {avatar.micEnabled ? "Mute" : "Unmute"}
-                  </button>
-                  <button
-                    onClick={avatar.interrupt}
-                    disabled={!avatar.replicaSpeaking}
-                    className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5 bg-white text-gray-800 hover:bg-gray-100 border border-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Cut in while the interviewer is speaking"
-                  >
-                    <Square className="w-3.5 h-3.5" />
-                    Interject
-                  </button>
                 </div>
-              ) : (
-                !interviewStarted && (
-                  <button
-                    onClick={startInterview}
-                    disabled={isLoading}
-                    className="w-full mt-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:from-gray-400 disabled:to-gray-400 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-lg transition-all flex items-center justify-center gap-1.5"
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Starting...
-                      </>
-                    ) : (
-                      "Start Interview"
-                    )}
-                  </button>
-                )
               )}
-            </div>
 
-            {/* User Video Container */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl flex-1 flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center">
-                    <Video className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <h3 className="text-sm font-bold text-gray-900">Your Video</h3>
-                </div>
-                {cameraEnabled && (
-                  <div className="flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-[10px] text-green-700 font-medium">Live</span>
-                  </div>
+              {/* Recording pill */}
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-lg pl-2.5 pr-3 py-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[11px] font-medium text-white tabular-nums">
+                  {formatClock(elapsed)}
+                </span>
+                <span className="text-[11px] text-white/50">recording</span>
+              </div>
+
+              {/* Interviewer name plate */}
+              <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-lg px-3 py-1.5">
+                <span className="text-xs font-medium text-white">AI Interviewer</span>
+                {interviewerSpeaking && (
+                  <span className="flex items-end gap-[2px] h-3">
+                    <span className="w-[3px] h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                    <span className="w-[3px] h-3 bg-blue-400 rounded-full animate-pulse animation-delay-100" />
+                    <span className="w-[3px] h-2 bg-blue-400 rounded-full animate-pulse animation-delay-200" />
+                  </span>
                 )}
               </div>
 
-              {/* Video Feed */}
-              <div className="relative flex-1 bg-black rounded-lg overflow-hidden min-h-0">
+              {/* Live caption of what the candidate is saying */}
+              {candidateSpeaking && liveSpeech && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[36%] bg-black/70 backdrop-blur-md rounded-xl px-4 py-2">
+                  <p className="text-xs text-white/95 text-center line-clamp-2">{liveSpeech}</p>
+                </div>
+              )}
+
+              {/* Self-view, bottom-right over the interviewer */}
+              <div
+                className={
+                  "absolute bottom-4 right-4 w-56 sm:w-64 lg:w-80 aspect-video rounded-2xl " +
+                  "overflow-hidden bg-black shadow-2xl ring-2 transition-colors " +
+                  (!cameraEnabled
+                    ? "ring-red-500/60"
+                    : faceStatus === "out_of_frame"
+                    ? "ring-amber-400"
+                    : candidateSpeaking
+                    ? "ring-green-400"
+                    : "ring-white/20")
+                }
+              >
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
                   muted
-                  className="w-full h-full object-cover"
+                  className={
+                    "w-full h-full object-cover " + (cameraEnabled ? "" : "invisible")
+                  }
                 />
-                
-                {/* Face status indicator */}
-                {faceStatus === "out_of_frame" && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="text-center text-white">
-                      <AlertTriangle className="w-8 h-8 mx-auto mb-2 animate-bounce" />
-                      <p className="text-xs font-semibold">Face not detected</p>
-                      <p className="text-[10px]">Please center yourself</p>
-                    </div>
+
+                {!cameraEnabled && (
+                  <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center">
+                    <VideoOff className="w-7 h-7 text-slate-500 mb-1.5" />
+                    <p className="text-[11px] font-medium text-slate-400">Camera off</p>
                   </div>
                 )}
 
-                {/* Corner guides */}
-                <div className="absolute top-2 left-2 w-8 h-8 border-l-2 border-t-2 border-blue-400 rounded-tl"></div>
-                <div className="absolute top-2 right-2 w-8 h-8 border-r-2 border-t-2 border-blue-400 rounded-tr"></div>
-                <div className="absolute bottom-2 left-2 w-8 h-8 border-l-2 border-b-2 border-blue-400 rounded-bl"></div>
-                <div className="absolute bottom-2 right-2 w-8 h-8 border-r-2 border-b-2 border-blue-400 rounded-br"></div>
-              </div>
-
-              {/* Audio Level & Controls */}
-              <div className="mt-2 space-y-2">
-                {/* Audio Level */}
-                <div className="flex items-center gap-2">
-                  <Mic className="w-3.5 h-3.5 text-gray-600" />
-                  <div className="flex-1 h-1.5 bg-blue-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-blue-400 to-cyan-500 transition-all duration-100"
-                      style={{ width: `${audioLevel}%` }}
-                    ></div>
-                  </div>
-                </div>
-
-                {/* Live speech preview */}
-                {candidateSpeaking && liveSpeech && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
-                    <p className="text-[10px] text-blue-700 font-semibold mb-0.5">
-                      Listening…
-                    </p>
-                    <p className="text-xs text-gray-700 line-clamp-2">
-                      {liveSpeech}
+                {cameraEnabled && faceStatus === "out_of_frame" && (
+                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-center px-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 mb-1" />
+                    <p className="text-[11px] font-semibold text-amber-200 leading-tight">
+                      Center your face
                     </p>
                   </div>
                 )}
 
-                {/* Conversation status. With the avatar live there is nothing
-                    to press — Tavus decides when the candidate has finished. */}
-                {avatarLive ? (
-                  <div
-                    className={`w-full px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 ${
-                      !avatar.micEnabled
-                        ? "bg-red-50 text-red-700 border border-red-200"
-                        : avatar.replicaSpeaking
-                        ? "bg-blue-50 text-blue-700 border border-blue-200"
-                        : candidateSpeaking
-                        ? "bg-green-50 text-green-700 border border-green-200"
-                        : "bg-gray-50 text-gray-600 border border-gray-200"
-                    }`}
-                  >
-                    <Mic className="w-3.5 h-3.5" />
-                    {!avatar.micEnabled
-                      ? "Microphone muted"
-                      : avatar.replicaSpeaking
-                      ? "Interviewer speaking — just talk to cut in"
-                      : candidateSpeaking
-                      ? "Listening…"
-                      : "Ready — start speaking any time"}
-                  </div>
-                ) : (
-                  interviewStarted && (
-                    <button
-                      onClick={toggleListening}
-                      disabled={isSpeaking}
-                      className={`w-full px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-                        isListening
-                          ? "bg-red-500 hover:bg-red-600 text-white"
-                          : "bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
-                      } ${isSpeaking ? "opacity-50 cursor-not-allowed" : ""}`}
-                    >
-                      {isListening ? (
-                        <>
-                          <Square className="w-3.5 h-3.5 fill-current" />
-                          End Speaking
-                        </>
-                      ) : (
-                        <>
-                          <Mic className="w-3.5 h-3.5" />
-                          Start Speaking
-                        </>
-                      )}
-                    </button>
-                  )
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Right Side - Transcript & Code Editor */}
-          <div className="flex-1 flex flex-col gap-3 min-w-0">
-            {/* Transcript Container */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl flex-1 flex flex-col min-h-0">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center">
-                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <h3 className="text-sm font-bold text-gray-900">Interview Transcript</h3>
-                <div className="ml-auto text-[10px] text-gray-500">
-                  {transcript.length} message{transcript.length !== 1 ? "s" : ""}
-                </div>
-              </div>
-
-              {/* Transcript Messages */}
-              <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-1">
-                {transcript.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-center">
-                    <div>
-                      <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-full mx-auto mb-3 flex items-center justify-center">
-                        <svg className="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                        </svg>
-                      </div>
-                      <p className="text-xs font-semibold text-gray-900 mb-1">
-                        {avatar.status === "connecting"
-                          ? "Connecting to your interviewer…"
-                          : "Ready to Start"}
-                      </p>
-                      <p className="text-[10px] text-gray-500">
-                        {avatarLive
-                          ? "Your interviewer will greet you in a moment"
-                          : avatar.status === "connecting"
-                          ? "One moment"
-                          : 'Click "Start Interview" to begin'}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {transcript.map((entry, idx) => (
+                {/* Name + mic level: visible evidence you are being heard */}
+                <div className="absolute bottom-2 left-2 right-2 flex items-center gap-2">
+                  <span className="text-[11px] text-white font-medium bg-black/60 backdrop-blur-md rounded-md px-2 py-1 truncate max-w-[45%]">
+                    {candidateFirstName}
+                  </span>
+                  <div className="flex-1 flex items-center gap-1.5 bg-black/60 backdrop-blur-md rounded-md px-2 py-1.5">
+                    {micOn ? (
+                      <Mic className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                    ) : (
+                      <MicOff className="w-3 h-3 text-red-400 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 h-1 bg-white/15 rounded-full overflow-hidden">
                       <div
-                        key={idx}
-                        className={`rounded-lg p-2 shadow-sm ${
-                          entry.type === "question"
-                            ? "bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100"
-                            : entry.type === "answer"
-                            ? "bg-gradient-to-br from-green-50 to-emerald-50 border border-green-100"
-                            : "bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          {entry.type === "question" && (
-                            <>
-                              <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
-                                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                              </div>
-                              <span className="text-[10px] font-semibold text-blue-700">Interviewer</span>
-                            </>
-                          )}
-                          {entry.type === "answer" && (
-                            <>
-                              <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                              </div>
-                              <span className="text-[10px] font-semibold text-green-700">You</span>
-                            </>
-                          )}
-                          {entry.type === "system" && (
-                            <>
-                              <CheckCircle className="w-3.5 h-3.5 text-gray-600" />
-                              <span className="text-[10px] font-semibold text-gray-700">System</span>
-                            </>
-                          )}
-                          <span className="ml-auto text-[9px] text-gray-400">
-                            {entry.timestamp.toLocaleTimeString()}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-800 leading-relaxed">{entry.text}</p>
-                      </div>
-                    ))}
-                    <div ref={transcriptEndRef} />
-                  </>
-                )}
+                        className={
+                          "h-full transition-all duration-100 " +
+                          (micOn ? "bg-green-400" : "bg-red-500")
+                        }
+                        style={{ width: (micOn ? audioLevel : 100) + "%" }}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Code Editor Container */}
-            {showCodeEditor && (
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl flex-shrink-0">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-lg flex items-center justify-center">
-                    <Code2 className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <h3 className="text-sm font-bold text-gray-900">Code Editor</h3>
-                  <div className="ml-auto text-[10px] text-indigo-600 font-medium">
-                    Coding Question
-                  </div>
-                </div>
+            {/* ---- Control bar ---- */}
+            <div className="flex-shrink-0 flex items-center justify-between gap-2">
+              {/* Left: conversation state, read-only */}
+              <div
+                className={
+                  "h-11 px-3.5 rounded-xl flex items-center gap-2 text-xs font-medium min-w-0 " +
+                  (avatarLive && interviewerSpeaking
+                    ? "bg-blue-500/15 text-blue-300"
+                    : avatarLive && candidateSpeaking
+                    ? "bg-green-500/15 text-green-300"
+                    : "bg-white/5 text-slate-400")
+                }
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0" />
+                <span className="truncate">
+                  {!avatarLive
+                    ? avatar.status === "connecting"
+                      ? "Connecting"
+                      : "Voice-only mode"
+                    : interviewerSpeaking
+                    ? "Interviewer speaking"
+                    : candidateSpeaking
+                    ? "Listening"
+                    : "Ready, speak any time"}
+                </span>
+              </div>
 
-                <textarea
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="Write your code here..."
-                  className="w-full h-32 bg-gray-900 text-green-400 font-mono text-xs p-3 rounded-lg border-2 border-gray-700 focus:border-indigo-500 focus:outline-none resize-none"
-                  spellCheck={false}
-                />
+              {/* Center: device status + end call */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleToggleMic}
+                  className={micOn ? actionTile : dangerTile}
+                  title={micOn ? "Mute microphone" : "Unmute microphone"}
+                  aria-pressed={!micOn}
+                >
+                  {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                </button>
+                <button
+                  onClick={handleToggleCamera}
+                  className={cameraEnabled ? actionTile : dangerTile}
+                  title={cameraEnabled ? "Turn camera off" : "Turn camera on"}
+                  aria-pressed={!cameraEnabled}
+                >
+                  {cameraEnabled ? (
+                    <Video className="w-5 h-5" />
+                  ) : (
+                    <VideoOff className="w-5 h-5" />
+                  )}
+                </button>
 
                 <button
-                  onClick={submitCode}
-                  disabled={isSubmittingCode || !code.trim()}
-                  className="w-full mt-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-lg transition-all flex items-center justify-center gap-1.5"
+                  onClick={() => setShowExitDialog(true)}
+                  className="h-11 px-5 rounded-xl bg-red-600 hover:bg-red-500 text-white flex items-center gap-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111A24]"
+                  title="End interview"
                 >
-                  {isSubmittingCode ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Submitting...
-                    </>
+                  <PhoneOff className="w-5 h-5" />
+                  <span className="hidden sm:inline">End</span>
+                </button>
+              </div>
+
+              {/* Right: panel switches */}
+              <div className="flex items-center gap-2">
+                {showCodeEditor && (
+                  <button
+                    onClick={() => {
+                      setActivePanel("code");
+                      setSidePanelOpen(true);
+                    }}
+                    className={
+                      activePanel === "code" && sidePanelOpen ? activeTile : actionTile
+                    }
+                    title="Code editor"
+                  >
+                    <Code2 className="w-5 h-5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setActivePanel("transcript");
+                    setSidePanelOpen(true);
+                  }}
+                  className={
+                    activePanel === "transcript" && sidePanelOpen ? activeTile : actionTile
+                  }
+                  title="Transcript"
+                >
+                  <MessageSquareText className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setSidePanelOpen((open) => !open)}
+                  className={actionTile}
+                  title={sidePanelOpen ? "Hide panel" : "Show panel"}
+                >
+                  {sidePanelOpen ? (
+                    <PanelRightClose className="w-5 h-5" />
                   ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      Submit Code
-                    </>
+                    <PanelRightOpen className="w-5 h-5" />
                   )}
                 </button>
               </div>
-            )}
+            </div>
           </div>
+
+          {/* ============ Side panel ============ */}
+          {sidePanelOpen && (
+            <aside className="hidden md:flex w-[340px] lg:w-[380px] flex-shrink-0 flex-col bg-white rounded-2xl overflow-hidden">
+              <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+                <h2 className="text-base font-semibold text-gray-900">Interview Details</h2>
+                <button
+                  onClick={() => setSidePanelOpen(false)}
+                  className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                  title="Close panel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="mx-4 mb-3 p-1 bg-gray-100 rounded-xl flex gap-1">
+                <button
+                  onClick={() => setActivePanel("transcript")}
+                  className={
+                    "flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors " +
+                    (activePanel === "transcript"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700")
+                  }
+                >
+                  Transcript
+                </button>
+                <button
+                  onClick={() => showCodeEditor && setActivePanel("code")}
+                  disabled={!showCodeEditor}
+                  className={
+                    "flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 " +
+                    (activePanel === "code"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : showCodeEditor
+                      ? "text-gray-500 hover:text-gray-700"
+                      : "text-gray-300 cursor-not-allowed")
+                  }
+                  title={showCodeEditor ? "Code editor" : "Appears when a coding question is asked"}
+                >
+                  Code
+                  {showCodeEditor && activePanel !== "code" && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  )}
+                </button>
+              </div>
+
+              {/* ---- Transcript ---- */}
+              {activePanel === "transcript" && (
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 space-y-3">
+                  {transcript.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-center px-4">
+                      <div>
+                        <div className="w-14 h-14 bg-gray-100 rounded-full mx-auto mb-3 flex items-center justify-center">
+                          <MessageSquareText className="w-6 h-6 text-gray-400" />
+                        </div>
+                        <p className="text-xs font-semibold text-gray-900 mb-1">
+                          {avatar.status === "connecting" ? "Connecting" : "Nothing said yet"}
+                        </p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">
+                          {avatarLive
+                            ? "Your interviewer will greet you in a moment. Everything said appears here."
+                            : avatar.status === "connecting"
+                            ? "Setting up the conversation"
+                            : "The conversation will appear here"}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {transcript.map((entry, idx) => {
+                        const isYou = entry.type === "answer";
+                        const isSystem = entry.type === "system";
+                        return (
+                          <div
+                            key={idx}
+                            className={"flex gap-2 " + (isYou ? "flex-row-reverse" : "")}
+                          >
+                            <div
+                              className={
+                                "w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center " +
+                                (isSystem ? "bg-gray-200" : isYou ? "bg-green-100" : "bg-blue-100")
+                              }
+                            >
+                              {isSystem ? (
+                                <CheckCircle className="w-3.5 h-3.5 text-gray-500" />
+                              ) : (
+                                <svg
+                                  className={
+                                    "w-3.5 h-3.5 " + (isYou ? "text-green-600" : "text-blue-600")
+                                  }
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                              )}
+                            </div>
+                            <div
+                              className={
+                                "min-w-0 max-w-[85%] flex flex-col " +
+                                (isYou ? "items-end" : "items-start")
+                              }
+                            >
+                              <div
+                                className={
+                                  "rounded-2xl px-3 py-2 " +
+                                  (isSystem
+                                    ? "bg-gray-100 text-gray-700"
+                                    : isYou
+                                    ? "bg-blue-600 text-white rounded-tr-sm"
+                                    : "bg-gray-100 text-gray-800 rounded-tl-sm")
+                                }
+                              >
+                                <p className="text-xs leading-relaxed whitespace-pre-wrap break-words">
+                                  {entry.text}
+                                </p>
+                              </div>
+                              <span className="text-[9px] text-gray-400 mt-1 px-1">
+                                {isSystem ? "System" : isYou ? "You" : "Interviewer"}
+                                {" · "}
+                                {entry.timestamp.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div ref={transcriptEndRef} />
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ---- Code ---- */}
+              {activePanel === "code" && (
+                <div className="flex-1 min-h-0 flex flex-col px-4 pb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Code2 className="w-4 h-4 text-indigo-600" />
+                    <span className="text-xs font-semibold text-gray-900">Your solution</span>
+                    <span className="ml-auto text-[10px] text-gray-400">
+                      talk through it as you go
+                    </span>
+                  </div>
+
+                  <textarea
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Write your code here"
+                    className="flex-1 min-h-0 w-full bg-[#0F1720] text-green-400 font-mono text-xs leading-relaxed p-3 rounded-xl border border-gray-800 focus:border-indigo-500 focus:outline-none resize-none"
+                    spellCheck={false}
+                  />
+
+                  <button
+                    onClick={submitCode}
+                    disabled={isSubmittingCode || !code.trim()}
+                    className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+                  >
+                    {isSubmittingCode ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Submitting
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        Submit code
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </aside>
+          )}
         </div>
+
+        {/* Push-to-talk fallback: only when there is no live avatar */}
+        {!avatarLive && interviewStarted && (
+          <div className="flex-shrink-0 px-3 pb-3">
+            <button
+              onClick={toggleListening}
+              disabled={isSpeaking}
+              className={
+                "w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 " +
+                (isListening
+                  ? "bg-red-600 hover:bg-red-500 text-white"
+                  : "bg-green-600 hover:bg-green-500 text-white") +
+                (isSpeaking ? " opacity-50 cursor-not-allowed" : "")
+              }
+            >
+              {isListening ? (
+                <>
+                  <Square className="w-4 h-4 fill-current" />
+                  Done speaking
+                </>
+              ) : (
+                <>
+                  <Mic className="w-4 h-4" />
+                  Start speaking
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {!avatarLive && !interviewStarted && (
+          <div className="flex-shrink-0 px-3 pb-3">
+            <button
+              onClick={startInterview}
+              disabled={isLoading}
+              className="w-full px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Starting
+                </>
+              ) : (
+                "Start interview"
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       <style>{`
         @keyframes shake {
           0%, 100% { transform: translateX(-50%) translateY(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-50%) translateY(-5px); }
-          20%, 40%, 60%, 80% { transform: translateX(-50%) translateY(5px); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-50%) translateY(-4px); }
+          20%, 40%, 60%, 80% { transform: translateX(-50%) translateY(4px); }
         }
-        .animate-shake {
-          animation: shake 0.5s;
-        }
-        .animation-delay-100 {
-          animation-delay: 0.1s;
-        }
-        .animation-delay-200 {
-          animation-delay: 0.2s;
-        }
-        
-        /* Custom scrollbar for transcript */
-        .overflow-y-auto::-webkit-scrollbar {
-          width: 6px;
-        }
-        .overflow-y-auto::-webkit-scrollbar-track {
-          background: #f1f5f9;
-          border-radius: 3px;
-        }
+        .animate-shake { animation: shake 0.5s; }
+        .animation-delay-100 { animation-delay: 0.1s; }
+        .animation-delay-200 { animation-delay: 0.2s; }
+
+        .overflow-y-auto::-webkit-scrollbar { width: 6px; }
+        .overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
         .overflow-y-auto::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
+          background: #d1d5db;
           border-radius: 3px;
         }
-        .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
+        .overflow-y-auto::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+        @media (prefers-reduced-motion: reduce) {
+          .animate-shake, .animate-pulse, .animate-spin { animation: none !important; }
         }
       `}</style>
     </div>

@@ -304,16 +304,51 @@ automatically when the interview ends so it stops consuming credits.
 ### Live conversation setup
 
 Tavus's servers must reach your backend. In production that is just your
-deployed hostname; locally you need a tunnel:
+deployed hostname; locally you need a tunnel.
+
+**Install `cloudflared`** (free, no account needed for quick tunnels):
 
 ```bash
+brew install cloudflared                        # macOS
+winget install --id Cloudflare.cloudflared      # Windows
+```
+
+<details>
+<summary>Linux, or macOS without Homebrew</summary>
+
+```bash
+# Debian / Ubuntu
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+sudo dpkg -i cloudflared.deb
+
+# macOS without Homebrew (Apple Silicon; use -amd64 for Intel)
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz | tar xz
+sudo mv cloudflared /usr/local/bin/
+```
+</details>
+
+Verify, then run it:
+
+```bash
+cloudflared --version
+
 # terminal 1 - backend
 ./run.sh backend
 
-# terminal 2 - tunnel (either tool)
+# terminal 2 - tunnel (leave it open; closing it kills the tunnel)
 cloudflared tunnel --url http://localhost:8100
-ngrok http 8100
 ```
+
+It prints a boxed URL — that is the value you want:
+
+```
++----------------------------------------------------------+
+|  Your quick Tunnel has been created! Visit it at:         |
+|  https://random-words-here.trycloudflare.com              |
++----------------------------------------------------------+
+```
+
+`ngrok http 8100` works too, if you already have ngrok set up.
 
 Copy the public `https://…` URL into `server/.env` and restart the backend:
 
@@ -327,9 +362,36 @@ TAVUS_LLM_API_KEY=<long random string>
 > do not leave it blank. Generate one with
 > `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
+Then confirm Tavus can actually reach you — `404 Session not found` is the
+**healthy** answer here (it means auth passed; `401` means the key is wrong,
+and a timeout means the tunnel is down):
+
+```bash
+curl -X POST https://<tunnel-host>/v1/chat/completions \
+  -H "Authorization: Bearer $TAVUS_LLM_API_KEY" \
+  -H "Content-Type: application/json" -d '{"messages":[]}'
+```
+
 The tunnel hostname changes each time you restart `cloudflared`, so update
 `TAVUS_LLM_BASE_URL` and clear `TAVUS_PAL_ID` when it does — the PAL stores the
 URL, so a stale one leaves the avatar silent.
+
+<details>
+<summary>Getting a hostname that does not change</summary>
+
+Quick tunnels get a random hostname every run. A free Cloudflare account plus a
+domain gives you a stable one, so you stop re-editing `.env`:
+
+```bash
+cloudflared tunnel login                     # opens a browser
+cloudflared tunnel create git-hired
+cloudflared tunnel route dns git-hired git-hired.yourdomain.com
+cloudflared tunnel run --url http://localhost:8100 git-hired
+```
+
+Then set `TAVUS_LLM_BASE_URL=https://git-hired.yourdomain.com` once and pin
+`TAVUS_PAL_ID` permanently.
+</details>
 
 **Tuning the feel** (all optional, in `server/.env`):
 
