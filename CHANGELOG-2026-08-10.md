@@ -1,23 +1,24 @@
-# Change log — cross-platform setup, Tavus API migration, live conversation
+# Change log — cross-platform setup, Tavus API migration, live conversation, interview structure
 
 **Baseline:** [`2f346e3`](https://github.com/shrujaya/git-hired/commit/2f346e37174a03c38a1b6e725dc44778e8142f59)
 — *"feat: add setup script and environment configuration…"* (Shruti Jayaraman, 2026-08-09)
 **Branch:** `v2.0` · **Date:** 2026-08-10
 
-The work landed in two batches:
+The work landed in three batches:
 
 | Batch | Contents | State |
 | --- | --- | --- |
 | **1** | Cross-platform setup, Tavus API migration, live conversation (§1–5) | Committed as [`7eca195`](https://github.com/shrujaya/git-hired/commit/7eca195) |
-| **2** | Interview-page redesign, working device controls, conversation-quality fixes (§6–7) | Uncommitted working tree |
+| **2** | Interview-page redesign, working device controls, conversation-quality fixes (§6–7) | Committed as [`fe16b0c`](https://github.com/shrujaya/git-hired/commit/fe16b0c) |
+| **3** | Interview structure, coding-round assessment, transcript log (§8–§12) | Uncommitted working tree |
 
-`git diff 2f346e3` reproduces both batches together.
+`git diff 2f346e3` reproduces all three batches together.
 
 ---
 
 ## TL;DR for the next person
 
-Five things happened, each triggered by the previous one failing:
+Seven things happened, each triggered by the previous one failing:
 
 1. **The repo did not run on Windows.** Fixed the setup/run scripts, the venv
    layout assumption, a console crash, and CWD-dependent config.
@@ -32,10 +33,23 @@ Five things happened, each triggered by the previous one failing:
 5. **The live conversation didn't feel human.** Long silences between turns, a
    monologue opening, and the coding question firing after one answer — all
    traced to concrete causes and fixed (§7).
+6. **The interview had no shape.** It opened mid-question, ran past its own
+   question budget forever because nothing compared the counter to it, and
+   treated the coding round as a single scored submission. Now: a three-beat
+   opening, a hint loop on the coding question, and an interview that ends
+   itself and prompts the candidate to leave (§8–§9).
+7. **Nothing was ever written down.** `save_transcript()` was only reachable
+   from an endpoint nothing calls, so no interview had ever produced a
+   transcript. It autosaves every turn now — and the first real log immediately
+   exposed three bugs (Known issues 10–12) (§10).
 
 **If you only read one thing:** the backend needs a **public URL**
 (`TAVUS_LLM_BASE_URL`) for the avatar to work at all. Locally that means running
 a tunnel. See [Live conversation setup](README.md#live-conversation-setup).
+
+**If you only fix one thing:** Known issue 10 — the resume analysis and the
+interview are saved under two different session ids, which is why report
+generation has never once succeeded.
 
 ---
 
@@ -369,6 +383,167 @@ Tavus `conversation.utterance` events, which were not being read.
 
 ---
 
+## 8. The interview now has a shape
+
+*(Batch 3 — uncommitted)*
+
+Two structural gaps, both of which a live run made obvious.
+
+### The opening was one turn; it is now three
+
+The greeting and the first question arrived glued together, so the candidate's
+very first spoken input was an answer to a technical question. The opening is
+now a scripted three-beat warm-up, one beat per candidate turn:
+
+1. **Greeting only** — "Hi Shruti, thanks for joining me today, how are you?"
+2. Candidate replies → **"tell me a bit about yourself"**
+3. Candidate introduces themselves → **first real question**, picking up on what
+   they just said
+
+`opening_stage` walks `awaiting_ack → awaiting_intro → done`
+([`interviewer.py`](server/agents/interviewer.py)). Both warm-up turns route
+through `_non_question_turn()`, the same path coding hints use.
+
+**Accounting matters here.** The greeting used to *be* question 1, so
+`current_question_num` now starts at **0** and the first real question is Q1 —
+the candidate still gets the full set. Neither warm-up turn is scored:
+`evaluate_response_quality` would otherwise grade "I'm good thanks" as a
+technical answer and drag the difficulty down before the interview started.
+
+### The interview never ended
+
+`questions_remaining` was passed into the prompt as advice and compared against
+nothing, so the interviewer generated questions past its own budget forever.
+The turn after the last planned question now sets `is_final`, instructs the
+model to close out rather than ask again, and is logged as a `closing`. It does
+not consume a question number.
+
+The frontend learns about it over the control channel (`interview_complete`)
+and, after a ~6s delay so the avatar can finish speaking, shows a dialog
+offering **End interview** / **Not yet — I have a question**. Dismissing is not
+a dead end: a green *Interview complete* pill in the header reopens it. The
+delay and the dismiss option both exist because the closing line invites final
+questions.
+
+---
+
+## 9. Coding round: assessment, hints, and a locked editor
+
+*(Batch 3 — uncommitted)*
+
+Previously: submit code → `CodeEvaluatorAgent` scored it → the UI announced
+*"Score: 7/10"* to the candidate mid-interview → nothing else happened. The
+score leak alone changes how a candidate answers everything after it.
+
+Now the round is a conversation. **Submitting only records the code**; the
+candidate then explains their logic aloud, and that spoken turn is what gets
+assessed — code and explanation together, via the new
+[`CodeEvaluatorAgent.assess_attempt()`](server/agents/code_evaluator.py):
+
+| Verdict | Behaviour |
+| --- | --- |
+| Correct | Brief acknowledgement **plus the next question in the same spoken turn** |
+| Incorrect, hints left | One hint naming the flaw without giving the fix; question number does **not** advance |
+| Incorrect, hints exhausted | Warm close naming what they got right, then move on |
+
+`CODING_MAX_HINTS` (default 3) bounds it. A candidate who explains before
+submitting is nudged rather than skipped, capped at the same limit.
+
+- **One round trip per turn.** `assess_attempt` returns `is_correct` *and* the
+  spoken line together via structured outputs — asking for a verdict and then
+  generating a line would double the silence. `output_config` carries `effort`
+  and a `json_schema` `format` in the same object.
+- **Hints must not consume questions**, or three hints would burn three
+  interview questions and drag the round into the closing.
+- **The rubric still runs** for the report — once, in a background thread, when
+  the round closes. `/api/interview/end` prefers `interviewer.coding_score`.
+- **A parse failure is treated as correct**, so a logging-level problem can
+  never strand a candidate mid-round.
+
+### Editor gating
+
+The editor opens on the coding question and **greys out on submit** (button
+reads *Submitted*), because the submitted code is what the interviewer is
+assessing — editing it underneath them would make the hint refer to code that
+no longer exists. A hint reopens and unlocks it via a new `coding_hint` control
+event, and reopens the Code tab: the candidate has usually switched to the
+transcript while explaining.
+
+---
+
+## 10. Transcript log
+
+*(Batch 3 — uncommitted)*
+
+`save_transcript()` was only reachable from `/api/interview/end`, which nothing
+calls (§ Known issues), so **no interview had ever produced a transcript**. It
+would also have raised `KeyError` on the newer entry types if it had run.
+
+The agent now autosaves after every turn — the log is complete and current even
+if the candidate just closes the tab — and covers every turn type: greeting,
+introduction request, each question with its difficulty, the coding question,
+every code submission *with the code*, each hint, and the closing. Header
+carries candidate/start/question count; footer carries the average score and
+the coding outcome. The JSON gained `coding.attempts`, `coding.score` and
+`interview_complete` for the report generator.
+
+Two fixes came with it: the **candidate line now prints before the
+interviewer's** (an entry pairs a reply with the answer that prompted it, so
+the old order read the conversation backwards), and a failing write is caught —
+a logging problem must never interrupt a live interview.
+
+`interviewer.session_id` is now set at session creation rather than at first
+code submission.
+
+---
+
+## 11. UI fixes
+
+*(Batch 3 — uncommitted)*
+
+- **The opening appeared twice in the transcript.** It has two independent
+  sources — seeded from `/api/interview/start`, and again as the Tavus utterance
+  for the `custom_greeting`, which is the same text. Whichever lands first now
+  wins; adjacent same-speaker duplicates are dropped, which also absorbs
+  duplicate utterance events from turn retries. Comparison is
+  whitespace/punctuation-insensitive, since ASR output rarely matches our
+  generated text byte for byte.
+- **The transcript did not autoscroll.** The effect looked correct, but the
+  panel *unmounts* when it is not the active tab: lines arriving while the Code
+  tab is open hit a detached ref, and switching back never re-ran the effect.
+  `activePanel`/`sidePanelOpen` are now dependencies, and it sets `scrollTop` on
+  the container rather than calling `scrollIntoView` on a sentinel — that also
+  scrolls every scrollable ancestor and can shift the call layout.
+- **The results-page timer never stopped.** It ran a `setInterval` against
+  `sessionStart` (set at *device check*, before the landing page), so "Time
+  Spent" both over-reported and kept climbing while the candidate read the page.
+  The duration is now measured once when the interview ends and simply
+  displayed. The in-call timer is also derived from a start timestamp rather
+  than an incrementing counter, which backgrounded tabs throttle.
+- **Confetti never stopped** on the results page: an early `return` inside
+  `if (startTime)` meant the 3s hide was never scheduled for any real session.
+
+---
+
+## 12. Control-channel events
+
+*(Batch 3 — uncommitted)*
+
+Tavus speaks the interviewer's lines, so the browser learns about state changes
+only over `/ws/{session_id}`. Batch 3 adds two to the existing
+`coding_question`:
+
+| Event | Fires when | UI effect |
+| --- | --- | --- |
+| `coding_hint` | The interviewer asks for another attempt | Reopens + unlocks the editor |
+| `interview_complete` | The closing line has been delivered | Shows the end-of-interview prompt |
+
+All three are gated behind `fresh_turn`. **This matters:** Tavus retries turns,
+and without the gate a retry would re-unlock a submitted editor or pop the end
+prompt repeatedly.
+
+---
+
 ## New environment variables
 
 All in [`server/.env.example`](server/.env.example).
@@ -387,6 +562,7 @@ All in [`server/.env.example`](server/.env.example).
 | `TAVUS_VOICE_ISOLATION` | `near` | Background-noise filtering |
 | `REPLY_MAX_TOKENS` | `1024` | Budget for **one spoken turn** — reports keep the 8192 budget |
 | `REPLY_EFFORT` | `low` | Effort for conversational turns; the main latency lever |
+| `CODING_MAX_HINTS` | `3` | Hints offered on the coding question before the interview moves on (§9) |
 
 Frontend: `VITE_API_BASE_URL` in `agentic-interviewer/.env.local`.
 
@@ -412,6 +588,16 @@ into the PAL at creation.
 `server/agents/report_generator.py` (missing `encoding='utf-8'` on a transcript
 read — would break on Windows with accented names), `setup.sh`, `README.md`,
 `.gitignore`, and the frontend pages/types/utils.
+
+**Modified (batch 3)** — `server/agents/interviewer.py` (+348/−… — opening
+stages, coding hint loop, auto-close, transcript writer/autosave),
+`server/agents/code_evaluator.py` (`assess_attempt`),
+`server/prompts/agent_prompts.py` (three-beat opening, coding-assessment
+prompt), `server/backend/server.py` (`coding_hint` / `interview_complete`
+events, `/code/submit` records instead of scoring, agent gets `session_id`),
+`server/config/settings.py` (`CODING_MAX_HINTS`),
+`agentic-interviewer/src/pages/InterviewPage.tsx` (editor gating, end prompt,
+transcript dedup + autoscroll), `ResultsPage.tsx` (frozen duration, confetti).
 
 **Modified (batch 2)** — `InterviewPage.tsx` (+935/−… — the layout rebuild),
 `useTavusAvatar.ts` (device control + defensive utterance parsing),
@@ -448,10 +634,38 @@ read — would break on Windows with accented names), `setup.sh`, `README.md`,
 - `tsc --noEmit` clean; production build passes; Vite transforms both changed
   modules at runtime.
 
-**Not verified in either batch:** the live in-browser call — it needs a real
+**Batch 3:** 93 assertions across five stubbed-agent suites, no network except
+where noted.
+
+- **30** coding round: correct/hint/exhausted branches, hints never advance the
+  question counter, resubmission replaces the original, parse failure still
+  moves on, non-coding turns untouched.
+- **20** opening: greeting and introduction request consume no questions,
+  neither is scored, real answers resume scoring, and **all 10 questions are
+  still asked** after the warm-up.
+- **14** auto-close: exactly one closing turn, at the budget and not before;
+  the counter stops at 10; the coding question is never the closing turn.
+- **19** transcript log: a full interview played end to end, then the real files
+  inspected — every turn type present in both formats, both code attempts
+  logged, chronological ordering, the file updating per-turn, and a deliberately
+  broken save not breaking the interview.
+- **10** control events, driven through `/v1/chat/completions` with
+  `TestClient`: each event fires on the right turn and **retries do not
+  re-fire** it.
+- **Live against the Anthropic key**: `assess_attempt` on a wrong brute-force
+  solution produced a hint naming the real bug without giving the fix; a correct
+  one-pass hash map got a 10-word acknowledgement. This also confirmed
+  `output_config` accepts `effort` and a `json_schema` `format` together.
+- `tsc --noEmit` clean; production build passes.
+- **One live end-to-end interview** (session `307379fb…`) exercised the whole
+  batch and produced a complete transcript — see Known issues 10–12 for what it
+  exposed.
+
+**Not verified in any batch:** the live in-browser call — it needs a real
 microphone, camera permissions, and a running tunnel. In particular the
 **transcript field names are unconfirmed** (§7) and the rendered layout of §6
-was never seen in a browser from this session. Residual risk is mostly *tuning*
+and the §8 end-prompt dialog were never seen in a browser from this session.
+Residual risk is mostly *tuning*
 and field naming rather than plumbing.
 
 ---
@@ -484,6 +698,39 @@ and field naming rather than plumbing.
    next question was already chosen, so adaptation lags by up to one turn. That
    is the deliberate trade for halving the silence; if strict ordering ever
    matters, await the score for the *following* question rather than inline.
+
+### Found by the batch-3 live run — all still open
+
+The interview at 22:53 produced a full transcript, and the transcript is what
+exposed these. Fix 10 first; it is one line and it unblocks reports.
+
+10. **The resume analysis is filed under a different session id than the
+    interview.** [`server.py`](server/backend/server.py) mints a UUID, saves
+    `resume_analysis.*` under it, then *reassigns* `session_id` from
+    `create_session()`, which mints a second one. One interview lands in two
+    directories (`ca878e8d…` has the resume analysis, `307379fb…` has everything
+    else). This is why report generation fails with `FileNotFoundError: Resume
+    analysis not found` — the same failure the Nov 2025 sessions show.
+11. **Tavus placeholder text is stored as the candidate's words.**
+    `[the user did not respond]` is treated as a real answer — it consumes a
+    question, triggers a hint and gets scored — and
+    `<user_audio_analysis>…</user_audio_analysis>` blocks are prepended to
+    answers and saved verbatim, so they reach the score and the report as if
+    spoken. Both want sanitising on the way in.
+12. **The interviewer can ask a coding question off-script.** When the candidate
+    asked to skip ahead it offered one at Q2, but `is_coding_question` is
+    decided purely by the question counter, so no `coding_question` event fired
+    and the editor stayed shut — *"Where do I type? There's no coding editor."*
+    The scheduled coding question at Q5 opened it correctly.
+13. **`/api/interview/end` is never called.** The endpoint is fully implemented,
+    but the only frontend caller is `endInterview()` in `AiInterview.tsx` — a
+    page that is not in the router and whose call is explicitly suppressed with
+    `void endInterview;`. `handleExitInterview` just navigates to `/results`.
+    The transcript no longer depends on it (§10), but the **report, the manager
+    email, the Tavus conversation teardown** (so conversations keep consuming
+    credits after the candidate leaves) **and session cleanup** all still do.
+    The §8 end-of-interview dialog makes this much more visible, since it is now
+    the main way out of an interview.
 
 ---
 

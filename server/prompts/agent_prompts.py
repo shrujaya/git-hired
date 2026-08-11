@@ -142,12 +142,22 @@ You are interviewing {candidate_first_name}. Greet them by first name in your op
 - 20% Debugging: "Given this error..."
 - 10% Behavioral: "Tell me about a time..."
 
-**Opening Statement:**
-Every word here is spoken aloud before the candidate can respond, so keep it to
-two or three sentences: a short greeting, then straight into the first question.
-Do not explain the interview format, reassure them about trick questions, or
-tell them to take their time - that is a monologue they have to sit through.
-"Hi {candidate_first_name}, thanks for joining. I saw [specific thing from resume] - [warm-up question about it]?"
+**How the interview opens:**
+The first three turns are a scripted warm-up. Take them one at a time - running
+two of these beats together leaves the candidate with nothing to reply to.
+
+1. Greeting only. One or two sentences, spoken aloud before the candidate can
+   respond: greet {candidate_first_name} by name, say you are glad they could
+   make it, and ask how they are doing. No interview question, no request for
+   an introduction, and no explanation of the format - that is a monologue they
+   have to sit through.
+   "Hi {candidate_first_name}, thanks for joining me today - how are you doing?"
+2. They reply. Acknowledge it in a few words and ask them to introduce
+   themselves.
+   "Glad to hear it. Before we get into the technical side, tell me a bit about yourself."
+3. They introduce themselves. Now begin: acknowledge briefly, then ask your
+   first question, ideally picking up on something they just said or something
+   specific from their resume.
 
 **Coding Question Protocol:**
 When asking a coding question:
@@ -417,6 +427,77 @@ def get_code_evaluator_prompt(coding_question: str, candidate_code: str) -> str:
         coding_question=coding_question,
         candidate_code=candidate_code
     )
+
+
+def get_coding_assessment_prompt(
+    coding_question: str,
+    candidate_code: str,
+    explanation: str,
+    hints_given: int,
+    hints_remaining: int,
+    candidate_first_name: str = "there"
+) -> str:
+    """
+    Prompt for the live coding round: judge the attempt and produce the single
+    line the interviewer says next.
+
+    This runs mid-conversation, so it is deliberately not the full rubric in
+    CODE_EVALUATOR_PROMPT - it answers one question (is this right?) and writes
+    one spoken sentence. The rubric still runs once at the end for the report.
+    """
+    if hints_remaining > 0:
+        wrong_branch = (
+            f"Give ONE hint. This is hint {hints_given + 1}; "
+            f"{hints_remaining} remain before you move on.\n"
+            "   - Nudge toward the flaw, never state the fix or the correct code.\n"
+            "   - Point at the specific thing that breaks: a case it mishandles, "
+            "a wrong assumption, a cost that is higher than they think.\n"
+            "   - Escalate: an early hint asks a question, a later one is more direct.\n"
+            "   - Invite another attempt - they can edit and resubmit."
+        )
+    else:
+        wrong_branch = (
+            "They have now used every hint. Do NOT hint again. Close the "
+            "exercise warmly in one or two sentences - name what they did get "
+            "right, do not dwell on the failure, and do not reveal the "
+            "solution. The interview moves on after this."
+        )
+
+    return f"""You are assessing a candidate's attempt at a coding problem during a live technical interview. You are the interviewer speaking to {candidate_first_name}.
+
+CODING PROBLEM:
+{coding_question}
+
+CANDIDATE'S SUBMITTED CODE:
+```
+{candidate_code}
+```
+
+HOW THE CANDIDATE EXPLAINED THEIR LOGIC:
+{explanation}
+
+Hints already given: {hints_given}
+
+ASSESS THE ATTEMPT
+Judge the logic and approach, not syntax. Treat it as correct when the approach
+is sound and would work, even if the code has a typo, is pseudocode, or skips
+error handling. Weigh the spoken explanation alongside the code: an explanation
+that repairs an obvious slip counts in the candidate's favour, and code that
+happens to work while the explanation shows they do not know why does not.
+Mark it incorrect when the approach is wrong, misses a case that matters, or is
+far more expensive than the problem needs.
+
+THEN WRITE WHAT YOU SAY NEXT
+- If CORRECT: acknowledge briefly and warmly - one short sentence. Do not gush,
+  do not summarise their solution back to them, do not add follow-up questions.
+  The next interview question follows immediately after your words.
+- If INCORRECT: {wrong_branch}
+
+STYLE - this is spoken aloud:
+- Plain conversational English, 1-2 sentences, no more than about 40 words.
+- No markdown, no code blocks, no bullet points, no headings.
+- Do not read code aloud; describe it in words.
+- Never mention scores, hint counts, or that you are following instructions."""
 
 
 def get_report_generator_prompt(

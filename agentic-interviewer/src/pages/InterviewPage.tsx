@@ -28,6 +28,20 @@ interface TranscriptEntry {
   timestamp: Date;
 }
 
+// Two renderings of the same spoken line rarely match byte for byte: the text
+// we generate carries punctuation that Tavus's transcription may drop, and
+// whitespace differs. Compare on the words alone.
+const sameSpeech = (a: string, b: string): boolean => {
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/['’]/g, "") //     dont == don't
+      .replace(/[^\w\s]/g, " ") // "Dispatcher-Worker" == "dispatcher worker"
+      .replace(/\s+/g, " ")
+      .trim();
+  return normalize(a) === normalize(b);
+};
+
 const InterviewPage: React.FC = () => {
   const navigate = useNavigate();
   const { fullscreenExits, enterFullscreen, exitFullscreen } = useFullscreen();
@@ -65,6 +79,16 @@ const InterviewPage: React.FC = () => {
   const [showCodeEditor, setShowCodeEditor] = useState(false);
   const [code, setCode] = useState("");
   const [isSubmittingCode, setIsSubmittingCode] = useState(false);
+  // Locked between submitting a solution and the interviewer inviting a
+  // revision. A submitted answer is what the interviewer is assessing, so
+  // editing it underneath them would make their hint refer to code that no
+  // longer exists.
+  const [codeLocked, setCodeLocked] = useState(false);
+  // The interviewer has delivered its closing line. The prompt to finish is
+  // dismissible because that closing invites final questions — the candidate
+  // may still want to speak before leaving.
+  const [interviewComplete, setInterviewComplete] = useState(false);
+  const [showEndPrompt, setShowEndPrompt] = useState(false);
 
   // Device toggles. Kept here rather than read off the avatar, so they work
   // before (and without) a live Tavus call.
@@ -74,10 +98,17 @@ const InterviewPage: React.FC = () => {
   const [sidePanelOpen, setSidePanelOpen] = useState(true);
   const [activePanel, setActivePanel] = useState<"transcript" | "code">("transcript");
 
-  // Call timer, for the header readout
+  // Call timer, for the header readout. Derived from a fixed start timestamp
+  // rather than an incrementing counter: browsers throttle setInterval in a
+  // backgrounded tab, so a counter would silently under-report the length of
+  // the interview. This is also the value the results page reports.
+  const startedAtRef = useRef(Date.now());
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    const tick = () =>
+      setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -98,14 +129,21 @@ const InterviewPage: React.FC = () => {
   // questions our backend returns. Browser speech recognition + TTS below is
   // the push-to-talk fallback used only when the avatar is unavailable.
   const handleUtterance = useCallback((utterance: AvatarUtterance) => {
-    setTranscript((prev) => [
-      ...prev,
-      {
-        type: utterance.role === "interviewer" ? "question" : "answer",
-        text: utterance.text,
-        timestamp: new Date(),
-      },
-    ]);
+    const type = utterance.role === "interviewer" ? "question" : "answer";
+
+    setTranscript((prev) => {
+      // The opening line reaches us twice: once seeded from
+      // /api/interview/start below, and again as the utterance for the
+      // custom_greeting Tavus speaks. Whichever lands first wins; drop the
+      // echo. This also absorbs duplicate utterance events, which Tavus can
+      // emit when it retries a turn.
+      const last = prev[prev.length - 1];
+      if (last?.type === type && sameSpeech(last.text, utterance.text)) {
+        return prev;
+      }
+
+      return [...prev, { type, text: utterance.text, timestamp: new Date() }];
+    });
   }, []);
 
   const avatar = useTavusAvatar(
@@ -418,6 +456,27 @@ const InterviewPage: React.FC = () => {
       setShowCodeEditor(true);
       setActivePanel("code");
       setSidePanelOpen(true);
+      setCodeLocked(false);
+      return;
+    }
+
+    if (data.type === "interview_complete") {
+      // Let the avatar finish speaking its closing line before the dialog
+      // covers the screen — popping it mid-sentence reads as a cut-off.
+      setInterviewComplete(true);
+      setCodeLocked(true);
+      window.setTimeout(() => setShowEndPrompt(true), 6000);
+      return;
+    }
+
+    if (data.type === "coding_hint") {
+      // The interviewer is asking for another attempt, so hand the editor
+      // back. Reopening the panel matters as much as unlocking it: the
+      // candidate may have switched to the transcript tab while explaining.
+      setShowCodeEditor(true);
+      setActivePanel("code");
+      setSidePanelOpen(true);
+      setCodeLocked(false);
       return;
     }
 
@@ -582,20 +641,22 @@ const InterviewPage: React.FC = () => {
           body: JSON.stringify({ session_id: sessionId, code }),
         }
       );
-      const data = await response.json();
+      if (!response.ok) throw new Error(`Submit failed: ${response.status}`);
 
-      const feedback = `Code submitted! Score: ${data.score}/10. Feedback: ${data.feedback}`;
+      // Submitting is not the end of the exercise: the interviewer assesses
+      // the solution against how the candidate explains it, and may come back
+      // with a hint. So the editor stays open and the code stays put - they
+      // need it to revise. No score is shown; the backend no longer returns
+      // one, and quoting a score mid-interview would colour every later answer.
+      setCodeLocked(true);
       setTranscript((prev) => [
         ...prev,
         {
           type: "system",
-          text: feedback,
+          text: "Submitted successfully — talk the interviewer through your logic.",
           timestamp: new Date(),
         },
       ]);
-      speak(feedback);
-      setShowCodeEditor(false);
-      setCode("");
     } catch (error) {
       console.error("Failed to submit code:", error);
       alert("Failed to submit code. Please try again.");
@@ -663,6 +724,13 @@ const InterviewPage: React.FC = () => {
   // Handle exit interview
   const handleExitInterview = async () => {
     await exitFullscreen();
+    // Freeze the duration at the moment the interview ends. The results page
+    // reports how long the interview took, so it must not keep counting while
+    // the candidate sits reading it.
+    sessionStorage.setItem(
+      "interviewDuration",
+      String(Math.floor((Date.now() - startedAtRef.current) / 1000))
+    );
     sessionStorage.setItem("interviewCompleted", "true");
     navigate("/results");
   };
@@ -803,7 +871,18 @@ const InterviewPage: React.FC = () => {
               {jobTitle}
             </h1>
           </div>
-          <div className="ml-auto flex-shrink-0">
+          <div className="ml-auto flex-shrink-0 flex items-center gap-2">
+            {/* Dismissing the end-of-interview prompt shouldn't be a dead end —
+                this brings it back. */}
+            {interviewComplete && !showEndPrompt && (
+              <button
+                onClick={() => setShowEndPrompt(true)}
+                className="text-xs font-medium text-green-300 bg-green-500/15 hover:bg-green-500/25 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                Interview complete
+              </button>
+            )}
             <span className="text-xs font-mono tabular-nums text-slate-300 bg-white/5 px-2.5 py-1.5 rounded-lg">
               {formatClock(elapsed)}
             </span>
@@ -1196,27 +1275,46 @@ const InterviewPage: React.FC = () => {
                     <Code2 className="w-4 h-4 text-indigo-600" />
                     <span className="text-xs font-semibold text-gray-900">Your solution</span>
                     <span className="ml-auto text-[10px] text-gray-400">
-                      talk through it as you go
+                      {codeLocked
+                        ? "submitted — waiting on the interviewer"
+                        : "talk through it as you go"}
                     </span>
                   </div>
 
                   <textarea
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
+                    disabled={codeLocked}
                     placeholder="Write your code here"
-                    className="flex-1 min-h-0 w-full bg-[#0F1720] text-green-400 font-mono text-xs leading-relaxed p-3 rounded-xl border border-gray-800 focus:border-indigo-500 focus:outline-none resize-none"
+                    aria-label="Your solution"
+                    className={
+                      "flex-1 min-h-0 w-full font-mono text-xs leading-relaxed p-3 rounded-xl border resize-none focus:outline-none " +
+                      (codeLocked
+                        ? "bg-[#1A1F26] text-gray-500 border-gray-800 cursor-not-allowed"
+                        : "bg-[#0F1720] text-green-400 border-gray-800 focus:border-indigo-500")
+                    }
                     spellCheck={false}
                   />
 
                   <button
                     onClick={submitCode}
-                    disabled={isSubmittingCode || !code.trim()}
-                    className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+                    disabled={codeLocked || isSubmittingCode || !code.trim()}
+                    title={
+                      codeLocked
+                        ? "Submitted. The editor reopens if the interviewer asks you to revise it."
+                        : undefined
+                    }
+                    className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 disabled:hover:bg-gray-300 disabled:cursor-not-allowed text-white px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     {isSubmittingCode ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Submitting
+                      </>
+                    ) : codeLocked ? (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        Submitted
                       </>
                     ) : (
                       <>
@@ -1279,6 +1377,44 @@ const InterviewPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {showEndPrompt && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="end-prompt-title"
+        >
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            </div>
+
+            <h2 id="end-prompt-title" className="text-lg font-semibold text-gray-900">
+              That's the end of the interview
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Ending it now closes the call and takes you to your summary. If you
+              still have a question for the interviewer, you can ask it first.
+            </p>
+
+            <button
+              onClick={handleExitInterview}
+              autoFocus
+              className="w-full mt-5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              <PhoneOff className="w-4 h-4" />
+              End interview
+            </button>
+            <button
+              onClick={() => setShowEndPrompt(false)}
+              className="w-full mt-2 text-gray-600 hover:text-gray-900 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+            >
+              Not yet — I have a question
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes shake {

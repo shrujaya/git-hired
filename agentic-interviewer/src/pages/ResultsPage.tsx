@@ -30,27 +30,33 @@ function InterviewCompletePage() {
     // Get stored data
     const storedName = localStorage.getItem('candidateName') || 'Candidate'
     const storedJob = localStorage.getItem('jobTitle') || 'Position'
-    const startTime = sessionStorage.getItem('sessionStart');
-    
+
     setUserName(storedName)
     setJobTitle(storedJob)
 
-    // Calculate time elapsed
-  if (startTime) {
-    const update = () => {
-      const elapsed = Date.now() - parseInt(startTime, 10);
-      const minutes = Math.floor(elapsed / 60000);
-      const seconds = Math.floor((elapsed % 60000) / 1000);
-      setTimeElapsed(`${minutes}:${seconds.toString().padStart(2, '0')}`);
-    };
+    // How long the interview took. This is a finished measurement taken when
+    // the candidate left the interview, not a running clock - it must not keep
+    // climbing while they read this page.
+    const recorded = sessionStorage.getItem('interviewDuration')
+    // Sessions that ended before the duration was recorded only left a start
+    // timestamp behind. Read it once so the tile still shows something, rather
+    // than ticking as it used to.
+    const startTime = sessionStorage.getItem('sessionStart')
+    const totalSeconds = recorded
+      ? parseInt(recorded, 10)
+      : startTime
+        ? Math.floor((Date.now() - parseInt(startTime, 10)) / 1000)
+        : NaN
 
-    update(); // immediate
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }
+    if (Number.isFinite(totalSeconds) && totalSeconds >= 0) {
+      const minutes = Math.floor(totalSeconds / 60)
+      const seconds = totalSeconds % 60
+      setTimeElapsed(`${minutes}:${seconds.toString().padStart(2, '0')}`)
+    }
 
     // Hide confetti after animation
-    setTimeout(() => setShowConfetti(false), 3000)
+    const confettiTimer = setTimeout(() => setShowConfetti(false), 3000)
+    return () => clearTimeout(confettiTimer)
   }, [])
 
   const handleGoHome = () => {

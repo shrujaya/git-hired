@@ -146,6 +146,15 @@ class InterviewConfig(BaseModel):
     question_timeout: int = Field(default=300, description="Timeout per question in seconds")
     coding_question_timeout: int = Field(default=600, description="Timeout for coding questions in seconds")
     
+    # Coding round
+    # How many hints the interviewer offers before moving on. The candidate is
+    # nudged rather than told the answer; after this many unsuccessful attempts
+    # the interview proceeds so one problem cannot consume the whole session.
+    coding_max_hints: int = Field(
+        default_factory=lambda: env_int("CODING_MAX_HINTS", 3),
+        description="Hints offered on the coding question before moving on"
+    )
+
     # Scoring
     max_coding_score: int = Field(default=10, description="Maximum score for coding questions")
     total_interview_score: int = Field(default=100, description="Total interview score")

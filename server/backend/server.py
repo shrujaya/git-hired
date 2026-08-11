@@ -38,7 +38,6 @@ import time
 # Import agents
 from agents.resume_evaluator import ResumeEvaluatorAgent
 from agents.interviewer import InterviewerAgent
-from agents.code_evaluator import CodeEvaluatorAgent
 from agents.report_generator import ReportGeneratorAgent
 
 # Import config
@@ -633,6 +632,25 @@ async def tavus_llm_completions(request: Request):
             "question_number": result.get("question_number"),
         })
 
+    if fresh_turn and result.get("is_coding_hint"):
+        # A hint is an invitation to revise, so the editor has to become
+        # editable again. The candidate only hears the hint spoken by Tavus -
+        # without this the UI would stay locked after their submission.
+        await notify_session(session_id, {
+            "type": "coding_hint",
+            "content": reply,
+        })
+
+    if fresh_turn and result.get("is_final"):
+        # The interviewer has just said the interview is over. Tavus speaks
+        # that line, so the UI only learns about it here - without this the
+        # candidate would be left sitting on a finished interview.
+        session["interview_complete"] = True
+        await notify_session(session_id, {
+            "type": "interview_complete",
+            "content": reply,
+        })
+
     if fresh_turn:
         await notify_session(session_id, {
             "type": "question",
@@ -835,29 +853,23 @@ async def submit_code(request: CodingSubmission):
         coding_question = session.get("coding_question")
         if not coding_question:
             raise HTTPException(status_code=400, detail="No coding question found")
-        
-        # Evaluate code
-        print(f"💻 Evaluating code for session {request.session_id}...")
-        code_evaluator = CodeEvaluatorAgent()
-        
-        evaluation_result = code_evaluator.evaluate_code(
-            coding_question=coding_question,
-            candidate_code=request.code
-        )
-        
-        # Save evaluation
-        code_evaluator.save_evaluation(evaluation_result, request.session_id)
-        
-        # Store score in session
-        session["coding_score"] = evaluation_result["evaluation"]["score"]
+
+        # Submitting only records the solution. The interviewer responds to the
+        # candidate's spoken explanation of it on their next turn, assessing
+        # code and explanation together - so no scoring happens here, and none
+        # is returned: telling a candidate their score mid-interview would
+        # change how they answer everything that follows.
+        interviewer = session["interviewer_agent"]
+        interviewer.record_code_submission(request.code, request.session_id)
         session["coding_submitted"] = True
-        
+
         return {
-            "status": "evaluated",
-            "score": evaluation_result["evaluation"]["score"],
-            "feedback": evaluation_result["evaluation"]["summary"]
+            "status": "received",
+            "message": "Solution received - walk the interviewer through your logic."
         }
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -884,8 +896,14 @@ async def end_interview(request: EndInterviewRequest):
         # Save transcript
         interviewer.save_transcript(request.session_id)
         
-        # Get coding score (default to 5 if not submitted)
-        coding_score = session.get("coding_score", 5)
+        # Get coding score. The rubric runs in the background when the coding
+        # round closes, so prefer the agent's result and fall back to a neutral
+        # 5 when the candidate never submitted (or it has not landed yet).
+        coding_score = (
+            interviewer.coding_score
+            if getattr(interviewer, "coding_score", None) is not None
+            else session.get("coding_score", 5)
+        )
         
         # Generate report
         print(f"📊 Generating report for session {request.session_id}...")
@@ -950,18 +968,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 })
             
             elif data.get("type") == "code_submit":
-                # Evaluate code
-                code_evaluator = CodeEvaluatorAgent()
-                evaluation_result = code_evaluator.evaluate_code(
-                    coding_question=session.get("coding_question", ""),
-                    candidate_code=data.get("code", "")
+                # Same contract as POST /api/interview/code/submit: record the
+                # solution, say nothing about its quality. The interviewer
+                # assesses it when the candidate explains their logic aloud.
+                session["interviewer_agent"].record_code_submission(
+                    data.get("code", ""), session_id
                 )
-                
-                await websocket.send_json({
-                    "type": "code_evaluated",
-                    "score": evaluation_result["evaluation"]["score"],
-                    "feedback": evaluation_result["evaluation"]["summary"]
-                })
+                session["coding_submitted"] = True
+
+                await websocket.send_json({"type": "code_received"})
     
     except WebSocketDisconnect:
         print(f"WebSocket disconnected: {session_id}")
