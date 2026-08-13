@@ -110,7 +110,8 @@ class CodeEvaluatorAgent:
         explanation: str,
         hints_given: int,
         hints_remaining: int,
-        candidate_first_name: str = "there"
+        candidate_first_name: str = "there",
+        is_last_chance: bool = False
     ) -> Dict[str, Any]:
         """
         Judge one attempt at the coding question, mid-interview.
@@ -126,7 +127,8 @@ class CodeEvaluatorAgent:
             candidate_code: Whatever is currently in the editor
             explanation: How the candidate described their logic out loud
             hints_given: Hints already offered for this problem
-            hints_remaining: Hints still available before moving on
+            hints_remaining: Hints still available *after* this one
+            is_last_chance: No hints left - close the exercise instead
             candidate_first_name: Used to address the candidate naturally
 
         Returns:
@@ -138,7 +140,8 @@ class CodeEvaluatorAgent:
             explanation=explanation,
             hints_given=hints_given,
             hints_remaining=hints_remaining,
-            candidate_first_name=candidate_first_name
+            candidate_first_name=candidate_first_name,
+            is_last_chance=is_last_chance
         )
 
         # Structured output so the verdict is a real boolean rather than
@@ -209,7 +212,7 @@ class CodeEvaluatorAgent:
             Path to saved file
         """
         session_dir = config.logs_dir / session_id
-        session_dir.mkdir(exist_ok=True)
+        session_dir.mkdir(parents=True, exist_ok=True)
         
         # Save as formatted text
         eval_file = session_dir / "code_evaluation.txt"

@@ -155,6 +155,16 @@ class InterviewConfig(BaseModel):
         description="Hints offered on the coding question before moving on"
     )
 
+    # Turns the candidate may spend talking before submitting anything. This is
+    # a separate budget from the hints: filler like "yeah" or "mm-hmm" while
+    # they read the problem used to burn the hint budget and abandon the round
+    # before the candidate had written a line. Higher, because thinking aloud
+    # and asking for the problem to be repeated are normal.
+    coding_max_prompts: int = Field(
+        default_factory=lambda: env_int("CODING_MAX_PROMPTS", 6),
+        description="Turns allowed before a submission, before the round is abandoned"
+    )
+
     # Scoring
     max_coding_score: int = Field(default=10, description="Maximum score for coding questions")
     total_interview_score: int = Field(default=100, description="Total interview score")

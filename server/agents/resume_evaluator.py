@@ -181,7 +181,7 @@ class ResumeEvaluatorAgent:
         """
         # Create session directory
         session_dir = config.logs_dir / session_id
-        session_dir.mkdir(exist_ok=True)
+        session_dir.mkdir(parents=True, exist_ok=True)
         
         # Save analysis text
         analysis_file = session_dir / "resume_analysis.txt"

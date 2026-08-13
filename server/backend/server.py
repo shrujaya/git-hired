@@ -17,7 +17,10 @@ sys.path.append(str(SERVER_DIR))
 from config.console import enable_unicode_output
 enable_unicode_output()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form, Request
+from fastapi import (
+    FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File,
+    Form, Request, BackgroundTasks
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -318,11 +321,20 @@ class SessionManager:
         candidate_name: str,
         job_role: str,
         resume_analysis: str,
-        interviewer_agent: InterviewerAgent
+        interviewer_agent: InterviewerAgent,
+        session_id: Optional[str] = None
     ) -> str:
-        """Create new interview session"""
-        session_id = str(uuid.uuid4())
-        
+        """Create new interview session.
+
+        Args:
+            session_id: Reuse an id the caller has already written files
+                under. Minting a fresh one here would scatter a single
+                interview across two directories in logs/ - the resume
+                analysis under the caller's id, everything else under ours -
+                which is what broke report generation.
+        """
+        session_id = session_id or str(uuid.uuid4())
+
         self.sessions[session_id] = {
             "candidate_name": candidate_name,
             "job_role": job_role,
@@ -641,6 +653,16 @@ async def tavus_llm_completions(request: Request):
             "content": reply,
         })
 
+    if fresh_turn and result.get("coding_round_closed"):
+        # The exercise is over - solved, or abandoned after the candidate spent
+        # every turn without writing anything. Put the editor away, or it sits
+        # there looking live on a question nothing is assessing any more.
+        session["coding_submitted"] = False
+        await notify_session(session_id, {
+            "type": "coding_closed",
+            "content": reply,
+        })
+
     if fresh_turn and result.get("is_final"):
         # The interviewer has just said the interview is over. Tavus speaks
         # that line, so the UI only learns about it here - without this the
@@ -739,9 +761,16 @@ async def initialize_session(request: SessionInitRequest):
             candidate_name=candidate_name,
             job_role=request.job_role,
             resume_analysis=resume_analysis,
-            interviewer_agent=interviewer_agent
+            interviewer_agent=interviewer_agent,
+            session_id=session_id
         )
-        
+
+        # The agent writes its own transcript, so it needs the id from the
+        # moment the interview starts - not from the first code submission,
+        # which is where it used to be set and which never happens at all for
+        # a candidate who skips the coding round.
+        interviewer_agent.session_id = session_id
+
         # Save session info
         session = session_manager.get_session(session_id)
         session["session_id"] = session_id
@@ -860,7 +889,20 @@ async def submit_code(request: CodingSubmission):
         # is returned: telling a candidate their score mid-interview would
         # change how they answer everything that follows.
         interviewer = session["interviewer_agent"]
-        interviewer.record_code_submission(request.code, request.session_id)
+        accepted = interviewer.record_code_submission(request.code, request.session_id)
+
+        # An empty editor or "idk" is not an attempt. Reporting it as received
+        # would lock the editor behind a "Submitted" state the candidate
+        # cannot undo, on a solution that was never written.
+        if not accepted:
+            return {
+                "status": "empty",
+                "message": (
+                    "Nothing to submit yet - even a partial approach or some "
+                    "pseudocode is worth putting in."
+                )
+            }
+
         session["coding_submitted"] = True
 
         return {
@@ -874,61 +916,126 @@ async def submit_code(request: CodingSubmission):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/interview/end")
-async def end_interview(request: EndInterviewRequest):
+def _generate_report_task(
+    session_id: str,
+    candidate_name: str,
+    job_role: str,
+    coding_score: int
+):
     """
-    End interview and generate report
+    Write the report and email it, after the response has gone out.
+
+    Runs off the request because it is a Claude call plus an SMTP round trip -
+    tens of seconds the candidate would otherwise spend watching a spinner on
+    an interview that is already over. Failures are logged, never raised: the
+    interview itself has already been saved by this point, and a broken SMTP
+    config must not look like a lost interview.
     """
     try:
-        session = session_manager.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
+        print(f"📊 Generating report for session {session_id}...")
+        report_generator = ReportGeneratorAgent()
+        result = report_generator.generate_and_send_report(
+            session_id=session_id,
+            candidate_name=candidate_name,
+            job_role=job_role,
+            coding_score=coding_score
+        )
+        session = session_manager.get_session(session_id) or {}
+        session["report_file"] = result.get("report_file")
+        session["report_status"] = "sent" if result.get("email_sent") else "saved"
+        print(f"📊 Report {session['report_status']}: {result.get('report_file')}")
+    except Exception as e:
+        session = session_manager.get_session(session_id) or {}
+        session["report_status"] = "failed"
+        session["report_error"] = str(e)
+        print(f"⚠️  Report generation failed for {session_id}: {e}")
+
+
+@app.post("/api/interview/end")
+async def end_interview(request: EndInterviewRequest, background: BackgroundTasks):
+    """
+    End the interview: tear down the avatar, save the transcript, and queue the
+    report.
+
+    Only the fast, load-bearing work happens inline. The candidate is leaving
+    the page, so the response has to come back promptly - but the Tavus
+    conversation must be stopped before then, or it keeps consuming credits
+    until Tavus times it out on its own.
+    """
+    session = session_manager.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # The candidate can reach this twice - the end-of-interview dialog and the
+    # exit button both lead here, and a page unload can fire a third time.
+    # Ending twice would bill a second report and email the manager again.
+    if session.get("status") == "completed":
+        return {
+            "status": "already_ended",
+            "closing": session.get("closing", ""),
+            "report_status": session.get("report_status", "generating"),
+        }
+
+    try:
         interviewer = session["interviewer_agent"]
-
-        # End interview
         closing = interviewer.end_interview()
+        session["closing"] = closing
 
-        # Stop the avatar conversation before the slow report generation, so
-        # it is not left running at Tavus while the report is written.
+        # Before anything slow: an abandoned Tavus conversation keeps running
+        # server-side after the candidate has gone.
         await session_manager.end_tavus_conversation(request.session_id)
 
-        # Save transcript
+        # The agent autosaves every turn, so this is belt-and-braces - it
+        # captures the closing line and the final summary footer.
         interviewer.save_transcript(request.session_id)
-        
-        # Get coding score. The rubric runs in the background when the coding
-        # round closes, so prefer the agent's result and fall back to a neutral
-        # 5 when the candidate never submitted (or it has not landed yet).
+
+        # The rubric runs in the background when the coding round closes, so
+        # prefer the agent's result and fall back to a neutral 5 when the
+        # candidate never submitted (or it has not landed yet).
         coding_score = (
             interviewer.coding_score
             if getattr(interviewer, "coding_score", None) is not None
             else session.get("coding_score", 5)
         )
-        
-        # Generate report
-        print(f"📊 Generating report for session {request.session_id}...")
-        report_generator = ReportGeneratorAgent()
-        
-        report_result = report_generator.generate_and_send_report(
+
+        session_manager.end_session(request.session_id)
+        session["report_status"] = "generating"
+
+        background.add_task(
+            _generate_report_task,
             session_id=request.session_id,
             candidate_name=session["candidate_name"],
             job_role=session["job_role"],
             coding_score=coding_score
         )
-        
-        # Mark session as ended
-        session_manager.end_session(request.session_id)
-        
+
         return {
             "status": "completed",
             "closing": closing,
-            "report_generated": True,
-            "email_sent": report_result["email_sent"],
-            "report_file": report_result["report_file"]
+            "report_status": "generating",
         }
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"⚠️  Failed to end session {request.session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/interview/report-status/{session_id}")
+async def report_status(session_id: str):
+    """
+    Where the report got to. The results page can poll this instead of holding
+    the candidate on /api/interview/end while the report is written.
+    """
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "report_status": session.get("report_status", "not_started"),
+        "report_file": session.get("report_file"),
+        "error": session.get("report_error"),
+    }
 
 
 @app.websocket("/ws/{session_id}")

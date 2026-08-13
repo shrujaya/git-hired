@@ -445,18 +445,74 @@ const InterviewPage: React.FC = () => {
     }
   }, [avatarLive]);
 
+  // ---- opening the code editor -------------------------------------------
+  // The control event arrives the moment the backend has the question, but the
+  // candidate only hears it once Tavus has run it through TTS — several
+  // seconds later. Opening on arrival made the editor appear before any coding
+  // question had been asked, which is exactly as confusing as it sounds.
+  //
+  // So the open is deferred until the avatar has actually finished speaking.
+  // "Finished" means it started and then stopped: at the moment the event
+  // lands it has not started yet, so waiting for a bare `!speaking` would fire
+  // immediately and change nothing.
+  const pendingEditorRef = useRef(false);
+  const editorSpeechStartedRef = useRef(false);
+  const editorFallbackRef = useRef<number | null>(null);
+
+  const openCodeEditor = useCallback(() => {
+    pendingEditorRef.current = false;
+    editorSpeechStartedRef.current = false;
+    if (editorFallbackRef.current !== null) {
+      window.clearTimeout(editorFallbackRef.current);
+      editorFallbackRef.current = null;
+    }
+    setShowCodeEditor(true);
+    setActivePanel("code");
+    setSidePanelOpen(true);
+    setCodeLocked(false);
+  }, []);
+
+  const openCodeEditorWhenSpoken = useCallback(() => {
+    // No avatar means no speech events to wait for — the fallback TTS path
+    // reads the question locally, so open straight away.
+    if (!avatarLive) {
+      openCodeEditor();
+      return;
+    }
+    pendingEditorRef.current = true;
+    editorSpeechStartedRef.current = false;
+    if (editorFallbackRef.current !== null) {
+      window.clearTimeout(editorFallbackRef.current);
+    }
+    // If the speech events never arrive, the candidate still needs somewhere
+    // to type. 45s comfortably covers reading out a problem statement.
+    editorFallbackRef.current = window.setTimeout(() => {
+      if (pendingEditorRef.current) openCodeEditor();
+    }, 45000);
+  }, [avatarLive, openCodeEditor]);
+
   // Handle WebSocket message
   const handleWebSocketMessage = (data: any) => {
     // Server-pushed control events. With Tavus driving the conversation the
     // question reaches the candidate as speech, so these exist to keep the UI
     // in step — opening the editor when a coding question is asked.
     if (data.type === "coding_question") {
-      // Surface the editor the moment the question is asked — the candidate
-      // hears it as speech, so nothing on screen would otherwise change.
-      setShowCodeEditor(true);
-      setActivePanel("code");
-      setSidePanelOpen(true);
-      setCodeLocked(false);
+      openCodeEditorWhenSpoken();
+      return;
+    }
+
+    if (data.type === "coding_closed") {
+      // The exercise is over. Leaving the editor up invites a submission
+      // against a question nothing is assessing any more — which is how
+      // "there is no coding question" ended up recorded as a solution.
+      pendingEditorRef.current = false;
+      if (editorFallbackRef.current !== null) {
+        window.clearTimeout(editorFallbackRef.current);
+        editorFallbackRef.current = null;
+      }
+      setCodeLocked(true);
+      setShowCodeEditor(false);
+      setActivePanel("transcript");
       return;
     }
 
@@ -473,10 +529,9 @@ const InterviewPage: React.FC = () => {
       // The interviewer is asking for another attempt, so hand the editor
       // back. Reopening the panel matters as much as unlocking it: the
       // candidate may have switched to the transcript tab while explaining.
-      setShowCodeEditor(true);
-      setActivePanel("code");
-      setSidePanelOpen(true);
-      setCodeLocked(false);
+      // Deferred like the question, so the hint is heard before the tab moves
+      // under them.
+      openCodeEditorWhenSpoken();
       return;
     }
 
@@ -540,6 +595,28 @@ const InterviewPage: React.FC = () => {
 
   // One speaking indicator across both voices
   const interviewerSpeaking = avatarLive ? avatar.replicaSpeaking : isSpeaking;
+
+  // Release a deferred editor open once the interviewer has finished reading
+  // the question out. Requires a start *then* a stop — see the refs above.
+  useEffect(() => {
+    if (!pendingEditorRef.current) return;
+    if (interviewerSpeaking) {
+      editorSpeechStartedRef.current = true;
+      return;
+    }
+    if (editorSpeechStartedRef.current) {
+      openCodeEditor();
+    }
+  }, [interviewerSpeaking, openCodeEditor]);
+
+  // Clear the fallback timer if the candidate leaves mid-question.
+  useEffect(() => {
+    return () => {
+      if (editorFallbackRef.current !== null) {
+        window.clearTimeout(editorFallbackRef.current);
+      }
+    };
+  }, []);
   // Whether the candidate is being heard right now
   const candidateSpeaking = avatarLive ? avatar.userSpeaking : isListening;
   const liveSpeech = avatarLive ? avatar.interimSpeech : currentSpeech;
@@ -643,6 +720,23 @@ const InterviewPage: React.FC = () => {
       );
       if (!response.ok) throw new Error(`Submit failed: ${response.status}`);
 
+      const result = await response.json();
+
+      // The backend rejects a non-attempt ("idk", a stub). Leave the editor
+      // open and unlocked so the candidate can actually have a go, rather
+      // than stranding them behind a "Submitted" button.
+      if (result.status === "empty") {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            type: "system",
+            text: result.message ?? "Nothing to submit yet.",
+            timestamp: new Date(),
+          },
+        ]);
+        return;
+      }
+
       // Submitting is not the end of the exercise: the interviewer assesses
       // the solution against how the candidate explains it, and may come back
       // with a hint. So the editor stays open and the code stays put - they
@@ -721,8 +815,41 @@ const InterviewPage: React.FC = () => {
     };
   }, []);
 
+  // Guards the two buttons and the end-of-interview dialog that all lead
+  // here. The backend is idempotent too, but there is no reason to race it.
+  const endRequestedRef = useRef(false);
+
+  const endInterviewOnServer = useCallback(async () => {
+    const sessionId = sessionStorage.getItem("sessionId");
+    if (!sessionId || endRequestedRef.current) return;
+    endRequestedRef.current = true;
+
+    try {
+      const response = await fetch(apiUrl("/api/interview/end"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+        // The candidate is navigating away; let the request outlive the page.
+        keepalive: true,
+      });
+      if (!response.ok) {
+        throw new Error(`End interview failed: ${response.status}`);
+      }
+    } catch (error) {
+      // Allow a retry if this was transient and they exit again.
+      endRequestedRef.current = false;
+      console.error("Failed to end interview cleanly:", error);
+    }
+  }, []);
+
+  // The brief wait between clicking "End" and landing on the results page,
+  // while the backend tears the call down. Presentation only — it drives the
+  // wrapping-up overlay so the screen isn't frozen during the request.
+  const [isEnding, setIsEnding] = useState(false);
+
   // Handle exit interview
   const handleExitInterview = async () => {
+    setIsEnding(true);
     await exitFullscreen();
     // Freeze the duration at the moment the interview ends. The results page
     // reports how long the interview took, so it must not keep counting while
@@ -732,6 +859,17 @@ const InterviewPage: React.FC = () => {
       String(Math.floor((Date.now() - startedAtRef.current) / 1000))
     );
     sessionStorage.setItem("interviewCompleted", "true");
+
+    // Tell the backend the interview is over. This is what tears down the
+    // Tavus conversation (it keeps consuming credits otherwise), writes the
+    // closing into the transcript and queues the report. It returns as soon
+    // as that is done - the report itself is generated server-side after the
+    // response, so this does not hold the candidate here.
+    //
+    // Navigation is never blocked on it: a candidate who has finished must
+    // not be trapped on the call screen because the backend is unreachable.
+    await endInterviewOnServer();
+
     navigate("/results");
   };
 
@@ -772,27 +910,30 @@ const InterviewPage: React.FC = () => {
 
   // Shared tile geometry, so the control bar stays visually even.
   const tile =
-    "w-11 h-11 rounded-xl flex items-center justify-center transition-colors " +
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 " +
-    "focus-visible:ring-offset-2 focus-visible:ring-offset-[#111A24]";
+    "w-11 h-11 rounded-[9px] flex items-center justify-center transition-colors " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-soft " +
+    "focus-visible:ring-offset-2 focus-visible:ring-offset-night";
 
-  const actionTile = tile + " bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white";
-  const activeTile = tile + " bg-blue-600 text-white hover:bg-blue-500";
+  const actionTile =
+    tile + " bg-tile border border-tileedge text-[#C6D2D2] hover:bg-[#1D2627]";
+  const activeTile = tile + " bg-brand text-white hover:bg-[#12879F]";
   // A device that is off is a state worth noticing, so it reads red.
-  const dangerTile = tile + " bg-red-600 text-white hover:bg-red-500";
+  const dangerTile =
+    tile +
+    " bg-[rgba(220,38,38,0.12)] border border-[rgba(220,38,38,0.34)] text-[#F3B4AF] hover:bg-[rgba(220,38,38,0.22)]";
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#111A24]">
+    <div className="h-screen w-screen overflow-hidden bg-night font-sans">
       {/* Hidden canvas for video processing */}
       <canvas ref={canvasRef} width={640} height={480} className="hidden" />
 
       {/* Fullscreen warning */}
       {showWarning && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-white px-4 py-2.5 rounded-xl shadow-2xl animate-shake flex items-center gap-2.5 max-w-md">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+        <div className="fixed top-5 left-0 right-0 mx-auto w-fit z-50 bg-[#111819] border border-amber-500/40 text-amber-100 px-4 py-2.5 rounded-[11px] shadow-2xl animate-shake flex items-center gap-2.5 max-w-md">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-400" />
           <div className="flex-1">
-            <p className="font-bold text-xs">Fullscreen exited</p>
-            <p className="text-[10px] mt-0.5 text-white/90">
+            <p className="font-semibold text-xs">Fullscreen exited</p>
+            <p className="text-[10px] mt-0.5 text-amber-200/80">
               This has been recorded ({fullscreenExits} exit
               {fullscreenExits !== 1 ? "s" : ""}).
             </p>
@@ -802,33 +943,46 @@ const InterviewPage: React.FC = () => {
               enterFullscreen();
               setShowWarning(false);
             }}
-            className="bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors whitespace-nowrap"
+            className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors whitespace-nowrap"
           >
             Return
           </button>
         </div>
       )}
 
+      {/* Wrapping-up loader: covers the gap between "End interview" and the
+          results page while the backend closes the call and saves everything. */}
+      {isEnding && (
+        <div className="fixed inset-0 z-[60] bg-[rgba(6,9,10,0.9)] backdrop-blur-[3px] flex items-center justify-center px-6">
+          <div className="text-center animate-fadeup">
+            <div className="w-12 h-12 rounded-full border-2 border-brand/25 border-t-brand animate-spin mx-auto mb-5" />
+            <p className="text-[15px] font-medium tracking-tight text-dtext mb-1.5">
+              Wrapping up your interview
+            </p>
+            <p className="font-mono text-[11px] text-dmute">
+              saving transcript · closing the call
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Exit dialog */}
       {showExitDialog && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 mb-1">End interview?</h3>
-                <p className="text-xs text-gray-600">
-                  Your progress will be saved and reviewed.
-                </p>
-              </div>
-            </div>
+        <div className="fixed inset-0 bg-[rgba(6,9,10,0.78)] backdrop-blur-[3px] z-50 flex items-center justify-center p-4">
+          <div className="w-[420px] max-w-full rounded-[14px] border border-[#232C2D] bg-[#111819] p-6 animate-fadeup">
+            <h3 className="text-[17px] font-semibold tracking-tight text-dtext mb-2">
+              End the interview?
+            </h3>
+            <p className="text-[13.5px] leading-relaxed text-dsub mb-2">
+              Your transcript and code will be submitted as they are now.
+            </p>
 
             {(fullscreenExits > 0 || tabSwitches > 0) && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                <p className="text-xs font-semibold text-red-800 mb-1">Activity summary</p>
-                <ul className="text-[10px] text-red-700 space-y-0.5">
+              <div className="rounded-[9px] border border-[rgba(220,38,38,0.3)] bg-[rgba(220,38,38,0.08)] p-3 mb-2">
+                <p className="font-mono text-[10px] tracking-[0.07em] uppercase text-[#F1A7A2] mb-1.5">
+                  Activity summary
+                </p>
+                <ul className="text-[11.5px] text-[#E8B5B0] space-y-0.5">
                   {fullscreenExits > 0 && (
                     <li>{fullscreenExits} fullscreen exit{fullscreenExits !== 1 ? "s" : ""}</li>
                   )}
@@ -839,18 +993,20 @@ const InterviewPage: React.FC = () => {
               </div>
             )}
 
-            <div className="flex gap-2">
+            <p className="font-mono text-[11px] text-dmute mb-5">This cannot be undone.</p>
+
+            <div className="flex gap-2.5">
               <button
                 onClick={() => setShowExitDialog(false)}
-                className="flex-1 px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 rounded-xl text-sm font-semibold transition-colors"
+                className="flex-1 px-3 py-3 rounded-[9px] border border-[#2A3334] bg-[#161E1F] hover:bg-[#1E2728] text-[#D3DDDD] text-[13.5px] font-medium transition-colors"
               >
-                Cancel
+                Keep going
               </button>
               <button
                 onClick={handleExitInterview}
-                className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors"
+                className="flex-1 px-3 py-3 rounded-[9px] bg-[#B3352B] hover:bg-[#C43B30] text-white text-[13.5px] font-semibold transition-colors"
               >
-                End interview
+                End and submit
               </button>
             </div>
           </div>
@@ -858,32 +1014,42 @@ const InterviewPage: React.FC = () => {
       )}
 
       {/* ===================== App shell ===================== */}
-      <div className="w-full h-full bg-[#111A24] flex flex-col overflow-hidden">
+      <div className="w-full h-full bg-night text-dtext flex flex-col overflow-hidden">
 
         {/* ---- Header ---- */}
-        <header className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
-            <Video className="w-5 h-5 text-white" strokeWidth={2.2} />
+        <header className="flex items-center justify-between gap-3 px-4 md:px-5 h-[58px] flex-shrink-0 border-b border-edge bg-panel">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-6 h-6 rounded-md bg-brand flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              G
+            </div>
+            <div className="w-px h-5 bg-[#232C2D] flex-shrink-0 hidden sm:block" />
+            <div className="min-w-0">
+              <h1 className="text-[13px] font-medium tracking-tight text-dtext leading-tight truncate">
+                {jobTitle}
+              </h1>
+              <p className="font-mono text-[10.5px] text-dmute mt-px truncate hidden sm:block">
+                Technical interview · {todayLabel}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-[11px] leading-tight text-slate-400 truncate">{todayLabel}</p>
-            <h1 className="text-sm font-semibold text-white leading-tight truncate">
-              {jobTitle}
-            </h1>
-          </div>
-          <div className="ml-auto flex-shrink-0 flex items-center gap-2">
+
+          <div className="flex items-center gap-3.5 flex-shrink-0">
             {/* Dismissing the end-of-interview prompt shouldn't be a dead end —
                 this brings it back. */}
             {interviewComplete && !showEndPrompt && (
               <button
                 onClick={() => setShowEndPrompt(true)}
-                className="text-xs font-medium text-green-300 bg-green-500/15 hover:bg-green-500/25 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[rgba(52,211,153,0.12)] border border-[rgba(52,211,153,0.3)] text-[#6FD9B4] text-xs font-medium hover:bg-[rgba(52,211,153,0.2)] transition-colors"
               >
                 <CheckCircle className="w-3.5 h-3.5" />
-                Interview complete
+                <span className="hidden sm:inline">Interview complete</span>
               </button>
             )}
-            <span className="text-xs font-mono tabular-nums text-slate-300 bg-white/5 px-2.5 py-1.5 rounded-lg">
+            <div className="hidden sm:flex items-center gap-1.5 pl-2.5 pr-3 py-1.5 rounded-full bg-[rgba(220,38,38,0.12)] border border-[rgba(220,38,38,0.3)]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-recblink" />
+              <span className="font-mono text-[10.5px] tracking-[0.06em] text-[#F1A7A2]">REC</span>
+            </div>
+            <span className="font-mono text-[15px] font-medium tabular-nums text-dtext">
               {formatClock(elapsed)}
             </span>
           </div>
@@ -894,7 +1060,7 @@ const InterviewPage: React.FC = () => {
 
           {/* ============ Stage ============ */}
           <div className="flex-1 flex flex-col min-w-0 gap-3">
-            <div className="relative flex-1 min-h-0 rounded-2xl overflow-hidden bg-slate-800">
+            <div className="relative flex-1 min-h-0 rounded-[14px] overflow-hidden bg-stage border border-edge">
 
               {/* Interviewer video */}
               {avatarLive && avatar.remoteStream ? (
@@ -912,46 +1078,71 @@ const InterviewPage: React.FC = () => {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900">
-                  <div className="text-center">
-                    <div className="w-24 h-24 rounded-full bg-white/10 mx-auto mb-4 flex items-center justify-center">
-                      {avatar.status === "connecting" ? (
-                        <Loader2 className="w-9 h-9 text-slate-300 animate-spin" />
-                      ) : (
-                        <svg className="w-11 h-11 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
+                <div className="w-full h-full flex items-center justify-center bg-[radial-gradient(circle_at_50%_42%,#16211F_0%,#0D1213_62%)]">
+                  <div className="flex flex-col items-center gap-6">
+                    <div className="relative w-[116px] h-[116px] flex items-center justify-center">
+                      {(avatar.status === "connecting" || interviewerSpeaking) && (
+                        <>
+                          <div className="absolute inset-0 rounded-full border-[1.5px] border-brand animate-speakpulse" />
+                          <div className="absolute inset-0 rounded-full border-[1.5px] border-brand animate-speakpulse-late" />
+                        </>
                       )}
+                      <div className="w-[92px] h-[92px] rounded-full bg-gradient-to-br from-[#14808F] to-[#0B5C6E] flex items-center justify-center text-[27px] font-semibold tracking-tight text-[#EAF6F7]">
+                        {avatar.status === "connecting" ? (
+                          <Loader2 className="w-8 h-8 animate-spin" />
+                        ) : (
+                          "AI"
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm font-medium text-slate-200">
-                      {avatar.status === "connecting"
-                        ? "Connecting to your interviewer"
-                        : "AI Interviewer"}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {avatar.status === "connecting" ? "One moment" : "Voice-only mode"}
-                    </p>
+                    <div className="text-center">
+                      <p className="text-base font-medium tracking-tight text-dtext mb-2">
+                        AI Interviewer
+                      </p>
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[rgba(14,116,144,0.14)] border border-[rgba(14,116,144,0.32)]">
+                        <span
+                          className={
+                            "w-1.5 h-1.5 rounded-full " +
+                            (avatar.status === "connecting"
+                              ? "bg-amber-400 animate-recblink"
+                              : "bg-brand-soft")
+                          }
+                        />
+                        <span className="font-mono text-[11px] tracking-[0.03em] text-[#7FC3D1]">
+                          {avatar.status === "connecting"
+                            ? "connecting — one moment"
+                            : "voice-only mode"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
 
               {/* Recording pill */}
-              <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-lg pl-2.5 pr-3 py-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[11px] font-medium text-white tabular-nums">
-                  {formatClock(elapsed)}
+              <div className="absolute top-3.5 left-3.5 flex items-center gap-2 bg-[rgba(8,12,13,0.72)] backdrop-blur-md rounded-lg pl-2.5 pr-3 py-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-recblink" />
+                <span className="font-mono text-[11px] text-[#9DABAB] tabular-nums">
+                  {formatClock(elapsed)} · recording
                 </span>
-                <span className="text-[11px] text-white/50">recording</span>
               </div>
 
               {/* Interviewer name plate */}
-              <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-lg px-3 py-1.5">
-                <span className="text-xs font-medium text-white">AI Interviewer</span>
+              <div className="absolute bottom-[18px] left-[18px] flex items-center gap-2.5 bg-[rgba(8,12,13,0.72)] backdrop-blur-md rounded-lg px-3 py-1.5">
+                <span className="text-xs font-medium text-dtext">AI Interviewer</span>
+                <span
+                  className={
+                    "font-mono text-[10.5px] " +
+                    (interviewerSpeaking ? "text-[#7FC3D1]" : "text-dmute")
+                  }
+                >
+                  {interviewerSpeaking ? "speaking" : "listening"}
+                </span>
                 {interviewerSpeaking && (
-                  <span className="flex items-end gap-[2px] h-3">
-                    <span className="w-[3px] h-1.5 bg-blue-400 rounded-full animate-pulse" />
-                    <span className="w-[3px] h-3 bg-blue-400 rounded-full animate-pulse animation-delay-100" />
-                    <span className="w-[3px] h-2 bg-blue-400 rounded-full animate-pulse animation-delay-200" />
+                  <span className="flex items-end gap-[2.5px] h-[11px]">
+                    <span className="w-[2.5px] h-[5px] bg-brand-soft rounded-[2px] animate-pulse" />
+                    <span className="w-[2.5px] h-[11px] bg-brand-soft rounded-[2px] animate-pulse" />
+                    <span className="w-[2.5px] h-[8px] bg-brand-soft rounded-[2px] animate-pulse" />
                   </span>
                 )}
               </div>
@@ -966,15 +1157,15 @@ const InterviewPage: React.FC = () => {
               {/* Self-view, bottom-right over the interviewer */}
               <div
                 className={
-                  "absolute bottom-4 right-4 w-56 sm:w-64 lg:w-80 aspect-video rounded-2xl " +
-                  "overflow-hidden bg-black shadow-2xl ring-2 transition-colors " +
+                  "absolute bottom-4 right-4 w-56 sm:w-64 lg:w-80 aspect-video rounded-[11px] " +
+                  "overflow-hidden bg-[#12191A] shadow-2xl ring-1 transition-colors " +
                   (!cameraEnabled
                     ? "ring-red-500/60"
                     : faceStatus === "out_of_frame"
                     ? "ring-amber-400"
                     : candidateSpeaking
-                    ? "ring-green-400"
-                    : "ring-white/20")
+                    ? "ring-[#34D399]"
+                    : "ring-[#283132]")
                 }
               >
                 <video
@@ -988,9 +1179,9 @@ const InterviewPage: React.FC = () => {
                 />
 
                 {!cameraEnabled && (
-                  <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center">
-                    <VideoOff className="w-7 h-7 text-slate-500 mb-1.5" />
-                    <p className="text-[11px] font-medium text-slate-400">Camera off</p>
+                  <div className="absolute inset-0 bg-[#12191A] flex flex-col items-center justify-center">
+                    <VideoOff className="w-6 h-6 text-[#6E7C7C] mb-1.5" />
+                    <p className="font-mono text-[10.5px] text-[#6E7C7C]">camera off</p>
                   </div>
                 )}
 
@@ -1010,7 +1201,7 @@ const InterviewPage: React.FC = () => {
                   </span>
                   <div className="flex-1 flex items-center gap-1.5 bg-black/60 backdrop-blur-md rounded-md px-2 py-1.5">
                     {micOn ? (
-                      <Mic className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                      <Mic className="w-3 h-3 text-[#C6D2D2] flex-shrink-0" />
                     ) : (
                       <MicOff className="w-3 h-3 text-red-400 flex-shrink-0" />
                     )}
@@ -1033,12 +1224,12 @@ const InterviewPage: React.FC = () => {
               {/* Left: conversation state, read-only */}
               <div
                 className={
-                  "h-11 px-3.5 rounded-xl flex items-center gap-2 text-xs font-medium min-w-0 " +
+                  "h-11 px-3.5 rounded-[9px] border flex items-center gap-2 text-xs font-medium min-w-0 " +
                   (avatarLive && interviewerSpeaking
-                    ? "bg-blue-500/15 text-blue-300"
+                    ? "bg-[rgba(14,116,144,0.14)] border-[rgba(14,116,144,0.32)] text-[#7FC3D1]"
                     : avatarLive && candidateSpeaking
-                    ? "bg-green-500/15 text-green-300"
-                    : "bg-white/5 text-slate-400")
+                    ? "bg-[rgba(52,211,153,0.1)] border-[rgba(52,211,153,0.28)] text-[#6FD9B4]"
+                    : "bg-tile border-tileedge text-dmute")
                 }
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0" />
@@ -1080,11 +1271,11 @@ const InterviewPage: React.FC = () => {
 
                 <button
                   onClick={() => setShowExitDialog(true)}
-                  className="h-11 px-5 rounded-xl bg-red-600 hover:bg-red-500 text-white flex items-center gap-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111A24]"
+                  className="h-11 px-5 rounded-[9px] border border-[rgba(220,38,38,0.34)] bg-[rgba(220,38,38,0.1)] hover:bg-[rgba(220,38,38,0.2)] text-[#F3B4AF] flex items-center gap-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2 focus-visible:ring-offset-night"
                   title="End interview"
                 >
-                  <PhoneOff className="w-5 h-5" />
-                  <span className="hidden sm:inline">End</span>
+                  <PhoneOff className="w-[18px] h-[18px]" />
+                  <span className="hidden sm:inline">End interview</span>
                 </button>
               </div>
 
@@ -1133,12 +1324,20 @@ const InterviewPage: React.FC = () => {
 
           {/* ============ Side panel ============ */}
           {sidePanelOpen && (
-            <aside className="hidden md:flex w-[340px] lg:w-[380px] flex-shrink-0 flex-col bg-white rounded-2xl overflow-hidden">
-              <div className="flex items-center gap-2 px-4 pt-4 pb-3">
-                <h2 className="text-base font-semibold text-gray-900">Interview Details</h2>
+            <aside className="hidden md:flex w-[340px] lg:w-[400px] flex-shrink-0 flex-col bg-panel border border-edge rounded-[14px] overflow-hidden">
+              <div className="flex items-center gap-2.5 px-[18px] h-12 flex-shrink-0 border-b border-edge">
+                <h2 className="text-[13px] font-semibold tracking-tight text-dtext">
+                  Live transcript
+                </h2>
+                <div className="flex items-center gap-1.5 px-2 py-[3px] rounded-full bg-[rgba(52,211,153,0.12)]">
+                  <span className="w-[5px] h-[5px] rounded-full bg-[#34D399] animate-recblink" />
+                  <span className="font-mono text-[9.5px] tracking-[0.07em] text-[#6FD9B4]">
+                    LIVE
+                  </span>
+                </div>
                 <button
                   onClick={() => setSidePanelOpen(false)}
-                  className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                  className="ml-auto w-7 h-7 rounded-[7px] flex items-center justify-center text-dmute hover:text-dtext hover:bg-tile transition-colors"
                   title="Close panel"
                 >
                   <X className="w-4 h-4" />
@@ -1146,14 +1345,14 @@ const InterviewPage: React.FC = () => {
               </div>
 
               {/* Tabs */}
-              <div className="mx-4 mb-3 p-1 bg-gray-100 rounded-xl flex gap-1">
+              <div className="mx-[14px] mt-3 mb-2 p-1 bg-editor border border-[#1A2122] rounded-[9px] flex gap-1 flex-shrink-0">
                 <button
                   onClick={() => setActivePanel("transcript")}
                   className={
-                    "flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors " +
+                    "flex-1 py-1.5 rounded-[7px] text-xs font-medium transition-colors " +
                     (activePanel === "transcript"
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700")
+                      ? "bg-tile text-dtext border border-tileedge"
+                      : "text-dmute hover:text-[#C6D2D2]")
                   }
                 >
                   Transcript
@@ -1162,35 +1361,36 @@ const InterviewPage: React.FC = () => {
                   onClick={() => showCodeEditor && setActivePanel("code")}
                   disabled={!showCodeEditor}
                   className={
-                    "flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 " +
+                    "flex-1 py-1.5 rounded-[7px] text-xs font-medium transition-colors flex items-center justify-center gap-1.5 " +
                     (activePanel === "code"
-                      ? "bg-white text-gray-900 shadow-sm"
+                      ? "bg-tile text-dtext border border-tileedge"
                       : showCodeEditor
-                      ? "text-gray-500 hover:text-gray-700"
-                      : "text-gray-300 cursor-not-allowed")
+                      ? "text-dmute hover:text-[#C6D2D2]"
+                      : "text-[#3E4A4A] cursor-not-allowed")
                   }
                   title={showCodeEditor ? "Code editor" : "Appears when a coding question is asked"}
                 >
+                  <span className="font-mono text-[11px] text-brand-soft">&lt;/&gt;</span>
                   Code
                   {showCodeEditor && activePanel !== "code" && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-soft" />
                   )}
                 </button>
               </div>
 
               {/* ---- Transcript ---- */}
               {activePanel === "transcript" && (
-                <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 space-y-3">
+                <div className="flex-1 min-h-0 overflow-y-auto px-[18px] pt-2 pb-6 space-y-[17px]">
                   {transcript.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-center px-4">
                       <div>
-                        <div className="w-14 h-14 bg-gray-100 rounded-full mx-auto mb-3 flex items-center justify-center">
-                          <MessageSquareText className="w-6 h-6 text-gray-400" />
+                        <div className="w-12 h-12 bg-tile border border-tileedge rounded-full mx-auto mb-3 flex items-center justify-center">
+                          <MessageSquareText className="w-5 h-5 text-dmute" />
                         </div>
-                        <p className="text-xs font-semibold text-gray-900 mb-1">
+                        <p className="text-xs font-semibold text-dtext mb-1">
                           {avatar.status === "connecting" ? "Connecting" : "Nothing said yet"}
                         </p>
-                        <p className="text-[11px] text-gray-500 leading-relaxed">
+                        <p className="text-[11px] text-dmute leading-relaxed">
                           {avatarLive
                             ? "Your interviewer will greet you in a moment. Everything said appears here."
                             : avatar.status === "connecting"
@@ -1204,61 +1404,43 @@ const InterviewPage: React.FC = () => {
                       {transcript.map((entry, idx) => {
                         const isYou = entry.type === "answer";
                         const isSystem = entry.type === "system";
+                        const dot = isSystem
+                          ? "#8A9797"
+                          : isYou
+                          ? "#8AA39C"
+                          : "#3FA8BC";
                         return (
-                          <div
-                            key={idx}
-                            className={"flex gap-2 " + (isYou ? "flex-row-reverse" : "")}
-                          >
-                            <div
-                              className={
-                                "w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center " +
-                                (isSystem ? "bg-gray-200" : isYou ? "bg-green-100" : "bg-blue-100")
-                              }
-                            >
-                              {isSystem ? (
-                                <CheckCircle className="w-3.5 h-3.5 text-gray-500" />
-                              ) : (
-                                <svg
-                                  className={
-                                    "w-3.5 h-3.5 " + (isYou ? "text-green-600" : "text-blue-600")
-                                  }
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                              )}
-                            </div>
-                            <div
-                              className={
-                                "min-w-0 max-w-[85%] flex flex-col " +
-                                (isYou ? "items-end" : "items-start")
-                              }
-                            >
-                              <div
-                                className={
-                                  "rounded-2xl px-3 py-2 " +
-                                  (isSystem
-                                    ? "bg-gray-100 text-gray-700"
-                                    : isYou
-                                    ? "bg-blue-600 text-white rounded-tr-sm"
-                                    : "bg-gray-100 text-gray-800 rounded-tl-sm")
-                                }
+                          <div key={idx} className="flex flex-col gap-[5px] animate-fadeup">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-[5px] h-[5px] rounded-full flex-shrink-0"
+                                style={{ background: dot }}
+                              />
+                              <span
+                                className="font-mono text-[10px] tracking-[0.07em] uppercase"
+                                style={{ color: dot }}
                               >
-                                <p className="text-xs leading-relaxed whitespace-pre-wrap break-words">
-                                  {entry.text}
-                                </p>
-                              </div>
-                              <span className="text-[9px] text-gray-400 mt-1 px-1">
                                 {isSystem ? "System" : isYou ? "You" : "Interviewer"}
-                                {" · "}
+                              </span>
+                              <span className="font-mono text-[10px] text-[#5D6A6A]">
                                 {entry.timestamp.toLocaleTimeString([], {
                                   hour: "2-digit",
                                   minute: "2-digit",
                                 })}
                               </span>
                             </div>
+                            <p
+                              className={
+                                "text-[13px] leading-[1.62] pl-[13px] whitespace-pre-wrap break-words " +
+                                (isSystem
+                                  ? "text-[#8A9797] italic"
+                                  : isYou
+                                  ? "text-[#A9B7B7]"
+                                  : "text-[#C9D6D6]")
+                              }
+                            >
+                              {entry.text}
+                            </p>
                           </div>
                         );
                       })}
@@ -1270,11 +1452,10 @@ const InterviewPage: React.FC = () => {
 
               {/* ---- Code ---- */}
               {activePanel === "code" && (
-                <div className="flex-1 min-h-0 flex flex-col px-4 pb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Code2 className="w-4 h-4 text-indigo-600" />
-                    <span className="text-xs font-semibold text-gray-900">Your solution</span>
-                    <span className="ml-auto text-[10px] text-gray-400">
+                <div className="flex-1 min-h-0 flex flex-col px-[14px] pb-[14px]">
+                  <div className="flex items-center gap-2 px-1 h-9 flex-shrink-0">
+                    <span className="font-mono text-[11px] text-dmute">solution</span>
+                    <span className="ml-auto font-mono text-[10px] text-dmute">
                       {codeLocked
                         ? "submitted — waiting on the interviewer"
                         : "talk through it as you go"}
@@ -1288,10 +1469,10 @@ const InterviewPage: React.FC = () => {
                     placeholder="Write your code here"
                     aria-label="Your solution"
                     className={
-                      "flex-1 min-h-0 w-full font-mono text-xs leading-relaxed p-3 rounded-xl border resize-none focus:outline-none " +
+                      "flex-1 min-h-0 w-full font-mono text-xs leading-[1.65] p-3.5 rounded-[9px] border resize-none focus:outline-none [tab-size:4] " +
                       (codeLocked
-                        ? "bg-[#1A1F26] text-gray-500 border-gray-800 cursor-not-allowed"
-                        : "bg-[#0F1720] text-green-400 border-gray-800 focus:border-indigo-500")
+                        ? "bg-[#0C1112] text-[#5D6A6A] border-[#1A2122] cursor-not-allowed"
+                        : "bg-editor text-[#D2DEDE] border-[#1A2122] focus:border-brand")
                     }
                     spellCheck={false}
                   />
@@ -1304,7 +1485,7 @@ const InterviewPage: React.FC = () => {
                         ? "Submitted. The editor reopens if the interviewer asks you to revise it."
                         : undefined
                     }
-                    className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 disabled:hover:bg-gray-300 disabled:cursor-not-allowed text-white px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="w-full mt-3 bg-brand hover:bg-[#12879F] disabled:bg-tile disabled:text-dmute disabled:border disabled:border-tileedge disabled:cursor-not-allowed text-white px-3 py-3 rounded-[9px] text-xs font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     {isSubmittingCode ? (
                       <>
@@ -1336,10 +1517,10 @@ const InterviewPage: React.FC = () => {
               onClick={toggleListening}
               disabled={isSpeaking}
               className={
-                "w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 " +
+                "w-full px-3 py-3 rounded-[9px] text-xs font-semibold transition-colors flex items-center justify-center gap-2 " +
                 (isListening
-                  ? "bg-red-600 hover:bg-red-500 text-white"
-                  : "bg-green-600 hover:bg-green-500 text-white") +
+                  ? "bg-[#B3352B] hover:bg-[#C43B30] text-white"
+                  : "bg-brand hover:bg-[#12879F] text-white") +
                 (isSpeaking ? " opacity-50 cursor-not-allowed" : "")
               }
             >
@@ -1363,7 +1544,7 @@ const InterviewPage: React.FC = () => {
             <button
               onClick={startInterview}
               disabled={isLoading}
-              className="w-full px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+              className="w-full px-3 py-3 rounded-[9px] bg-brand hover:bg-[#12879F] disabled:bg-tile disabled:text-dmute text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2"
             >
               {isLoading ? (
                 <>
@@ -1380,20 +1561,23 @@ const InterviewPage: React.FC = () => {
 
       {showEndPrompt && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(6,9,10,0.78)] backdrop-blur-[3px] px-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="end-prompt-title"
         >
-          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 text-center">
-            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="w-6 h-6 text-green-600" />
+          <div className="w-[420px] max-w-full rounded-[14px] border border-[#232C2D] bg-[#111819] p-6 animate-fadeup">
+            <div className="w-10 h-10 rounded-full bg-[rgba(52,211,153,0.12)] border border-[rgba(52,211,153,0.3)] flex items-center justify-center mb-4">
+              <CheckCircle className="w-5 h-5 text-[#6FD9B4]" />
             </div>
 
-            <h2 id="end-prompt-title" className="text-lg font-semibold text-gray-900">
+            <h2
+              id="end-prompt-title"
+              className="text-[17px] font-semibold tracking-tight text-dtext"
+            >
               That's the end of the interview
             </h2>
-            <p className="mt-2 text-sm text-gray-600">
+            <p className="mt-2 text-[13.5px] leading-relaxed text-dsub">
               Ending it now closes the call and takes you to your summary. If you
               still have a question for the interviewer, you can ask it first.
             </p>
@@ -1401,14 +1585,14 @@ const InterviewPage: React.FC = () => {
             <button
               onClick={handleExitInterview}
               autoFocus
-              className="w-full mt-5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+              className="w-full mt-5 bg-brand hover:bg-[#12879F] text-white px-4 py-3 rounded-[9px] text-[13.5px] font-semibold transition-colors flex items-center justify-center gap-2"
             >
               <PhoneOff className="w-4 h-4" />
               End interview
             </button>
             <button
               onClick={() => setShowEndPrompt(false)}
-              className="w-full mt-2 text-gray-600 hover:text-gray-900 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+              className="w-full mt-2 text-dsub hover:text-dtext px-4 py-2.5 rounded-[9px] text-[13.5px] font-medium transition-colors"
             >
               Not yet — I have a question
             </button>
@@ -1417,25 +1601,19 @@ const InterviewPage: React.FC = () => {
       )}
 
       <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(-50%) translateY(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-50%) translateY(-4px); }
-          20%, 40%, 60%, 80% { transform: translateX(-50%) translateY(4px); }
-        }
-        .animate-shake { animation: shake 0.5s; }
-        .animation-delay-100 { animation-delay: 0.1s; }
-        .animation-delay-200 { animation-delay: 0.2s; }
-
         .overflow-y-auto::-webkit-scrollbar { width: 6px; }
         .overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
         .overflow-y-auto::-webkit-scrollbar-thumb {
-          background: #d1d5db;
+          background: #232C2D;
           border-radius: 3px;
         }
-        .overflow-y-auto::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+        .overflow-y-auto::-webkit-scrollbar-thumb:hover { background: #33403F; }
 
         @media (prefers-reduced-motion: reduce) {
-          .animate-shake, .animate-pulse, .animate-spin { animation: none !important; }
+          .animate-shake, .animate-pulse, .animate-spin,
+          .animate-speakpulse, .animate-speakpulse-late, .animate-recblink {
+            animation: none !important;
+          }
         }
       `}</style>
     </div>

@@ -40,6 +40,10 @@ class InterviewerAgent:
         self.start_time = None
         self.coding_question_asked = False
         self.coding_question = None
+        # The last real question put to the candidate. Scoring anchors on this
+        # rather than on transcript[-1], which is a hint or a code submission
+        # as often as it is a question.
+        self.last_question_asked: Optional[str] = None
         # Set once the closing line has been delivered.
         self.interview_complete = False
 
@@ -57,9 +61,15 @@ class InterviewerAgent:
         self.coding_assessments: List[Dict] = []
         self.coding_solved = False
         self.coding_score: Optional[int] = None
+        # Set for the one turn on which the round ends, so the UI can put the
+        # editor away. Without it the editor stayed open and kept accepting
+        # submissions for a question nobody was assessing any more.
+        self.coding_round_just_closed = False
         # Spoken on the way out of the coding round, ahead of the next question.
         self.coding_closing_remark: Optional[str] = None
-        # Set when code is submitted; only needed to file the evaluation.
+        # Set at session creation. Everything this agent writes - transcript,
+        # code evaluation - is filed under it, so it must not be left until
+        # the first code submission the way it used to be.
         self.session_id: Optional[str] = None
         self._code_evaluator = None
 
@@ -124,7 +134,9 @@ class InterviewerAgent:
             "role": "assistant",
             "content": opening
         })
-        
+
+        self._autosave()
+
         return opening
     
     def evaluate_response_quality(self, question: str, response: str) -> int:
@@ -230,18 +242,76 @@ class InterviewerAgent:
 
         threading.Thread(target=run, daemon=True).start()
 
-    def record_code_submission(self, code: str, session_id: Optional[str] = None):
+    def record_code_submission(self, code: str, session_id: Optional[str] = None) -> bool:
         """
         Record the candidate's current solution.
 
         Submitting does not itself produce a reply - the candidate explains
         their logic out loud next, and that spoken turn is what gets assessed.
         Resubmitting after a hint simply replaces the code.
+
+        A submission that is not an attempt ("idk", an empty editor) is
+        deliberately not recorded. Treating it as code sends it through the
+        full scoring rubric, which produces a 0/10 report explaining hash maps
+        to someone who never started - and it consumes a hint. The candidate
+        keeps being nudged to attempt the problem instead.
+
+        Returns:
+            True if the submission was recorded as an attempt.
         """
-        self.submitted_code = code
         if session_id:
             self.session_id = session_id
+
+        # The round is over - either solved, or abandoned after the candidate
+        # spent every turn without writing anything. A late submission has
+        # nothing to assess it, and recording it would leave the editor looking
+        # live on a question the interview has moved past.
+        if not self.coding_round_active:
+            print("📥 Ignored submission: the coding round is closed")
+            return False
+
+        if not self._is_code_attempt(code):
+            print(f"📥 Ignored non-attempt submission: {(code or '').strip()[:40]!r}")
+            return False
+
+        self.submitted_code = code
+        self.transcript.append({
+            "type": "code_submission",
+            "timestamp": datetime.now().isoformat(),
+            "question_number": self.current_question_num,
+            "code": code,
+        })
+        self._autosave()
         print(f"📥 Code submission recorded ({len(code)} chars)")
+        return True
+
+    @staticmethod
+    def _is_code_attempt(code: Optional[str]) -> bool:
+        """
+        Is this submission a genuine attempt at the problem?
+
+        Deliberately generous - a few lines of pseudocode or a partial
+        solution must count, since the round assesses reasoning rather than
+        syntax. It only rejects the obvious non-attempts.
+        """
+        stripped = (code or "").strip()
+        if len(stripped) < 10:
+            return False
+
+        # Longer give-ups that clear the length floor. Compared without
+        # punctuation so "I don't know..." matches "i dont know".
+        normalised = "".join(
+            c for c in stripped.lower() if c.isalnum() or c.isspace()
+        )
+        normalised = " ".join(normalised.split())
+        return not any(
+            normalised == phrase or normalised.startswith(phrase + " ")
+            for phrase in (
+                "i dont know", "i do not know", "no idea", "not sure",
+                "i have no idea", "i dont know how to do this",
+                "cant solve this", "i cant do this", "skip this",
+            )
+        )
 
     def _non_question_turn(self, spoken: str, **flags) -> Dict[str, Any]:
         """
@@ -263,6 +333,63 @@ class InterviewerAgent:
 
     def _coding_turn_result(self, spoken: str) -> Dict[str, Any]:
         return self._non_question_turn(spoken, is_coding_hint=True)
+
+    def _coding_prompt_reply(self, candidate_response: str) -> str:
+        """
+        Reply to something the candidate said before submitting any code.
+
+        This used to be one fixed sentence - "put your solution in the editor
+        and hit submit" - returned no matter what they had said. A candidate
+        who asked for the problem to be repeated was told to start typing, and
+        asked again, which is the loop that made the round unusable. The line
+        is generated now so it can answer the actual question, and the problem
+        statement is included so it can be restated verbatim.
+        """
+        instruction = (
+            "The candidate has not submitted any code yet. They just said:\n"
+            f'"{candidate_response}"\n\n'
+            "The coding problem you asked them is:\n"
+            f"{self.coding_question or '(not recorded)'}\n\n"
+            "Respond to what they actually said, out loud, in two or three "
+            "sentences:\n"
+            "- If they asked you to repeat or rephrase the problem, state it "
+            "again clearly, including the example input and output.\n"
+            "- If they asked a clarifying question about the problem, answer "
+            "it directly.\n"
+            "- If they are thinking aloud or their answer is filler, "
+            "acknowledge briefly and invite them to put whatever they have - "
+            "even pseudocode - in the editor.\n"
+            "Do not give away the solution or the approach, do not ask a new "
+            "interview question, and do not repeat a sentence you have "
+            "already said this round."
+        )
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=config.interview.reply_max_tokens,
+                output_config={"effort": config.interview.reply_effort},
+                system=get_interviewer_prompt(
+                    resume_analysis=self.resume_analysis,
+                    current_question=self.current_question_num,
+                    difficulty_level=self.difficulty_level,
+                    time_elapsed=self._minutes_elapsed(),
+                    questions_remaining=self._questions_remaining(),
+                    candidate_first_name=self.candidate_first_name,
+                ),
+                messages=self.conversation_history + [
+                    {"role": "user", "content": instruction}
+                ],
+            )
+            return first_text(response)
+        except Exception as e:
+            # The round must survive a failed call - falling silent here would
+            # leave the candidate staring at an editor with nothing spoken.
+            print(f"Coding prompt reply failed: {e}")
+            return (
+                "Take your time - put whatever you have in the editor, even "
+                "pseudocode, and talk me through your thinking."
+            )
 
     def _handle_opening_turn(self, candidate_response: str) -> Optional[Dict[str, Any]]:
         """
@@ -310,6 +437,7 @@ class InterviewerAgent:
                 "candidate": candidate_response,
             })
             print("👋 Asked the candidate to introduce themselves")
+            self._autosave()
             return self._non_question_turn(line, is_opening=True)
 
         # That was their introduction - the interview proper starts now.
@@ -332,29 +460,44 @@ class InterviewerAgent:
         """
         max_hints = config.interview.coding_max_hints
 
-        # Nothing to assess yet. Hold the floor with a nudge rather than
-        # advancing, or the coding question gets skipped by a candidate who
-        # starts talking before they submit. Capped so it cannot loop forever.
+        # Nothing to assess yet. Hold the floor rather than advancing, or the
+        # coding question gets skipped by a candidate who starts talking before
+        # they submit. Capped so it cannot loop forever.
         if not self.submitted_code:
-            if self.coding_prompts_given >= max_hints:
+            if self.coding_prompts_given >= config.interview.coding_max_prompts:
                 self.coding_round_active = False
+                self.coding_round_just_closed = True
                 self.coding_closing_remark = (
                     "No problem, let's leave that one there and keep going."
                 )
                 return None
 
             self.coding_prompts_given += 1
-            return self._coding_turn_result(
-                "Take your time - put your solution in the editor and hit submit, "
-                "then talk me through your thinking."
-            )
+            line = self._coding_prompt_reply(candidate_response)
+            self.transcript.append({
+                "type": "coding_prompt",
+                "timestamp": datetime.now().isoformat(),
+                "question_number": self.current_question_num,
+                "interviewer": line,
+                "candidate": candidate_response,
+            })
+            self._autosave()
+            return self._coding_turn_result(line)
 
+        # Whether this attempt is the candidate's last. The prompt needs to
+        # know before it writes: on the final attempt it closes the exercise
+        # warmly instead of offering a hint the candidate will never get to use.
+        hints_exhausted = self.coding_hints_given >= max_hints
         assessment = self.code_evaluator.assess_attempt(
             coding_question=self.coding_question or "",
             candidate_code=self.submitted_code,
             explanation=candidate_response,
             hints_given=self.coding_hints_given,
-            hints_remaining=max(0, max_hints - self.coding_hints_given),
+            # Hints left *after* this one. It used to be the count including
+            # this one, so the interviewer told the candidate "3 remain" while
+            # handing over hint 1 of 3.
+            hints_remaining=max(0, max_hints - self.coding_hints_given - 1),
+            is_last_chance=hints_exhausted,
             candidate_first_name=self.candidate_first_name or "there",
         )
 
@@ -370,8 +513,9 @@ class InterviewerAgent:
         # Correct, or out of hints: either way the interview moves on. The
         # difference is only in what gets said on the way out, which the
         # assessment already wrote.
-        if assessment["is_correct"] or self.coding_hints_given >= max_hints:
+        if assessment["is_correct"] or hints_exhausted:
             self.coding_round_active = False
+            self.coding_round_just_closed = True
             self.coding_solved = bool(assessment["is_correct"])
             self.coding_closing_remark = assessment["spoken_response"]
             self._evaluate_code_in_background(self.session_id)
@@ -386,6 +530,7 @@ class InterviewerAgent:
             "interviewer": assessment["spoken_response"],
             "candidate": candidate_response,
         })
+        self._autosave()
         return self._coding_turn_result(assessment["spoken_response"])
 
     def _minutes_elapsed(self) -> int:
@@ -428,10 +573,12 @@ class InterviewerAgent:
         # While the coding question is open this turn is the candidate
         # explaining their solution, not answering a new question. Assess it
         # and either hint or fall through to move the interview on.
+        coding_explanation = False
         if self.coding_round_active:
             coding_turn = self._handle_coding_turn(candidate_response)
             if coding_turn is not None:
                 return coding_turn
+            coding_explanation = True
 
         # Evaluate response quality.
         #
@@ -442,9 +589,13 @@ class InterviewerAgent:
         # is applied as soon as it arrives.
         # An introduction is not an answer to a technical question. Scoring it
         # would drag the difficulty down before the interview has started.
-        if not opening_beat and len(self.transcript) > 0:
-            last_question = self.transcript[-1].get("interviewer", "")
-            self._score_in_background(last_question, candidate_response)
+        #
+        # Nor is an explanation of a coding solution: that round has its own
+        # rubric, and scoring the explanation here as well counted it twice -
+        # against a hint line, since that is what sat at the end of the
+        # transcript by then.
+        if not opening_beat and not coding_explanation and self.last_question_asked:
+            self._score_in_background(self.last_question_asked, candidate_response)
 
 
         # Calculate time elapsed
@@ -567,13 +718,25 @@ class InterviewerAgent:
         if should_ask_coding:
             self.coding_question = next_question
             entry["is_coding_question"] = True
-        
+
+        # A closing is not something the candidate answers, so it must not
+        # become the anchor the next answer is scored against.
+        if not is_final:
+            self.last_question_asked = next_question
+
         self.transcript.append(entry)
-        
+        self._autosave()
+
+        # True only on the turn the coding round ended, so the UI can put the
+        # editor away instead of leaving it open on a finished exercise.
+        coding_closed = self.coding_round_just_closed
+        self.coding_round_just_closed = False
+
         return {
             "question": next_question,
             "is_coding_question": should_ask_coding,
             "is_final": is_final,
+            "coding_round_closed": coding_closed,
             "question_number": self.current_question_num,
             "difficulty_level": self.difficulty_level,
             "time_elapsed": time_elapsed,
@@ -582,18 +745,31 @@ class InterviewerAgent:
     
     def end_interview(self) -> str:
         """
-        End the interview gracefully
+        End the interview gracefully.
+
+        The interview normally closes itself: the turn after the last planned
+        question is generated as a tailored closing and logged. When that has
+        happened, this returns that line rather than appending a second,
+        generic sign-off - two closings in the transcript read as though the
+        candidate was dismissed twice.
         """
         print("🏁 Ending interview...")
-        
+
+        if self.interview_complete:
+            for entry in reversed(self.transcript):
+                if entry.get("type") == "closing":
+                    return entry.get("interviewer", "")
+
         closing = """Thank you for your time today. You did well and showed good problem-solving skills. We'll review your interview and get back to you soon. Do you have any questions for me?"""
-        
+
         self.transcript.append({
             "type": "closing",
             "timestamp": datetime.now().isoformat(),
             "interviewer": closing
         })
-        
+        self.interview_complete = True
+        self._autosave()
+
         return closing
     
     def get_transcript(self) -> List[Dict]:
@@ -606,53 +782,155 @@ class InterviewerAgent:
             return 0.0
         return sum(self.response_scores) / len(self.response_scores)
     
-    def save_transcript(self, session_id: str) -> Path:
+    @staticmethod
+    def _entry_heading(entry: Dict) -> str:
         """
-        Save interview transcript to file
-        
+        One-line heading for a transcript entry.
+
+        Every field is read with .get(): entry types differ in which keys they
+        carry, and indexing them directly used to raise KeyError on the first
+        warm-up turn and take the whole write down with it.
+        """
+        kind = entry.get("type", "turn")
+        number = entry.get("question_number")
+        difficulty = entry.get("difficulty_level")
+
+        if kind == "opening":
+            return "OPENING"
+        if kind == "opening_intro_request":
+            return "WARM-UP"
+        if kind == "closing":
+            return "CLOSING"
+        if kind == "coding_question":
+            return f"CODING QUESTION (Q{number})" if number else "CODING QUESTION"
+        if kind == "coding_hint":
+            hint = entry.get("hint_number", "?")
+            return f"HINT {hint} (Q{number})" if number else f"HINT {hint}"
+        if kind == "coding_prompt":
+            return f"CODING - WAITING (Q{number})" if number else "CODING - WAITING"
+        if kind == "code_submission":
+            return "CODE SUBMITTED"
+
+        heading = f"Q{number}" if number else kind.replace("_", " ").upper()
+        if difficulty:
+            # DifficultyLevel is plain int constants, so name the level rather
+            # than printing a bare "2" that means nothing to a human reader.
+            names = {1: "easy", 2: "medium", 3: "hard", 4: "expert"}
+            heading += f"  (difficulty: {names.get(difficulty, difficulty)})"
+        return heading
+
+    def _coding_summary(self) -> Dict[str, Any]:
+        """Coding-round outcome, for the report generator and the footer."""
+        return {
+            "question": self.coding_question,
+            "asked": self.coding_question_asked,
+            "solved": self.coding_solved,
+            "score": self.coding_score,
+            "hints_used": self.coding_hints_given,
+            "final_code": self.submitted_code,
+            "attempts": self.coding_assessments,
+        }
+
+    def save_transcript(self, session_id: Optional[str] = None) -> Optional[Path]:
+        """
+        Write the transcript to logs/<session_id>/.
+
         Args:
-            session_id: Session identifier
-            
+            session_id: Session identifier. Defaults to the id the agent was
+                given at session creation.
+
         Returns:
-            Path to transcript file
+            Path to the text transcript, or None if there was nothing to write.
         """
+        session_id = session_id or self.session_id
+        if not session_id:
+            print("⚠️  No session id - transcript not saved")
+            return None
+
         session_dir = config.logs_dir / session_id
-        session_dir.mkdir(exist_ok=True)
-        
-        # Save as formatted text
+        session_dir.mkdir(parents=True, exist_ok=True)
+
         transcript_file = session_dir / "interview_transcript.txt"
         with open(transcript_file, 'w', encoding='utf-8') as f:
-            f.write("="*80 + "\n")
+            f.write("=" * 80 + "\n")
             f.write("INTERVIEW TRANSCRIPT\n")
-            f.write("="*80 + "\n\n")
-            
+            f.write("=" * 80 + "\n")
+            f.write(f"Candidate:  {self.candidate_first_name or 'Candidate'}\n")
+            if self.start_time:
+                f.write(f"Started:    {self.start_time.isoformat(timespec='seconds')}\n")
+            f.write(f"Questions:  {self.current_question_num}\n")
+            f.write("=" * 80 + "\n")
+
             for entry in self.transcript:
-                f.write(f"\n[{entry['timestamp']}] ")
-                if entry['type'] == 'opening':
-                    f.write("OPENING\n")
-                    f.write(f"Interviewer: {entry['interviewer']}\n")
-                elif entry['type'] == 'closing':
-                    f.write("CLOSING\n")
-                    f.write(f"Interviewer: {entry['interviewer']}\n")
-                else:
-                    f.write(f"Q{entry['question_number']} (Difficulty: {entry['difficulty_level']})\n")
-                    f.write(f"Interviewer: {entry['interviewer']}\n")
-                    if 'candidate' in entry:
-                        f.write(f"Candidate: {entry['candidate']}\n")
-        
-        # Save as JSON
+                f.write(f"\n[{entry.get('timestamp', '')}] {self._entry_heading(entry)}\n")
+
+                # Candidate first: an entry pairs an interviewer line with the
+                # answer that prompted it, so printing the interviewer first
+                # made the log read as though the candidate answered a
+                # question that had not been asked yet.
+                candidate = entry.get("candidate")
+                if candidate:
+                    f.write(f"  Candidate:   {candidate}\n")
+
+                code = entry.get("code")
+                if code:
+                    f.write("  Code:\n")
+                    for line in code.splitlines():
+                        f.write(f"    {line}\n")
+
+                interviewer = entry.get("interviewer")
+                if interviewer:
+                    f.write(f"  Interviewer: {interviewer}\n")
+
+            coding = self._coding_summary()
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("SUMMARY\n")
+            f.write(f"  Average response score: {self.get_average_score():.1f}/100\n")
+            f.write(f"  Responses scored:       {len(self.response_scores)}\n")
+            if coding["asked"]:
+                outcome = "solved" if coding["solved"] else "not solved"
+                score = coding["score"]
+                score_text = f", score {score}/10" if score is not None else ""
+                f.write(
+                    f"  Coding round:           {outcome}{score_text}, "
+                    f"{coding['hints_used']} hint(s) used\n"
+                )
+            else:
+                f.write("  Coding round:           not reached\n")
+            f.write(f"  Interview completed:    {'yes' if self.interview_complete else 'no'}\n")
+            f.write("=" * 80 + "\n")
+
         json_file = session_dir / "interview_transcript.json"
         with open(json_file, 'w', encoding='utf-8') as f:
             json.dump({
+                "session_id": session_id,
+                "candidate_first_name": self.candidate_first_name,
+                "started_at": self.start_time.isoformat() if self.start_time else None,
                 "transcript": self.transcript,
                 "average_score": self.get_average_score(),
                 "total_questions": self.current_question_num,
-                "response_scores": self.response_scores
+                "response_scores": self.response_scores,
+                "difficulty_level": self.difficulty_level,
+                "coding": self._coding_summary(),
+                "interview_complete": self.interview_complete,
             }, f, indent=2)
-        
-        print(f"📁 Transcript saved to: {transcript_file}")
-        
+
         return transcript_file
+
+    def _autosave(self):
+        """
+        Persist after every turn.
+
+        The transcript used to be written only by /api/interview/end, which
+        nothing calls - so no interview ever produced one. Saving per turn
+        means the log is complete even when the candidate just closes the tab.
+        Failures are swallowed: a logging problem must never interrupt a live
+        interview.
+        """
+        try:
+            self.save_transcript()
+        except Exception as e:
+            print(f"⚠️  Transcript autosave failed: {e}")
 
 
 # Example usage

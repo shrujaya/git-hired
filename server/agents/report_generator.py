@@ -123,7 +123,7 @@ class ReportGeneratorAgent:
         """
         # Create reports directory
         reports_dir = config.reports_dir / session_id
-        reports_dir.mkdir(exist_ok=True)
+        reports_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -147,7 +147,7 @@ class ReportGeneratorAgent:
         
         # Also save in logs directory for consistency
         log_dir = config.logs_dir / session_id
-        log_dir.mkdir(exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
         log_report_file = log_dir / "interview_report.md"
         with open(log_report_file, 'w', encoding='utf-8') as f:
             f.write(f"# Interview Report: {report_data['candidate_name']}\n\n")

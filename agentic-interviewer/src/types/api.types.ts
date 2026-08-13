@@ -26,7 +26,8 @@ export interface JobType {
   description: string;
   skills: string[];
   level: string;
-  color: string;
+  /** Presentation-only; the Vantage redesign styles roles uniformly. */
+  color?: string;
 }
 
 export interface ApiError {

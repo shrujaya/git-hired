@@ -435,7 +435,8 @@ def get_coding_assessment_prompt(
     explanation: str,
     hints_given: int,
     hints_remaining: int,
-    candidate_first_name: str = "there"
+    candidate_first_name: str = "there",
+    is_last_chance: bool = False
 ) -> str:
     """
     Prompt for the live coding round: judge the attempt and produce the single
@@ -445,10 +446,18 @@ def get_coding_assessment_prompt(
     CODE_EVALUATOR_PROMPT - it answers one question (is this right?) and writes
     one spoken sentence. The rubric still runs once at the end for the report.
     """
-    if hints_remaining > 0:
+    # Driven by an explicit flag rather than by hints_remaining: the last hint
+    # is still a hint, and reading "0 remaining" as "stop hinting" made the
+    # interviewer close the exercise one attempt early.
+    if not is_last_chance:
+        remaining_note = (
+            f"{hints_remaining} more remain after this one"
+            if hints_remaining > 0
+            else "this is the last hint they get"
+        )
         wrong_branch = (
             f"Give ONE hint. This is hint {hints_given + 1}; "
-            f"{hints_remaining} remain before you move on.\n"
+            f"{remaining_note}.\n"
             "   - Nudge toward the flaw, never state the fix or the correct code.\n"
             "   - Point at the specific thing that breaks: a case it mishandles, "
             "a wrong assumption, a cost that is higher than they think.\n"
