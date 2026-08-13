@@ -94,6 +94,65 @@ docker compose exec backend sh -c 'tr "\0" "\n" < /proc/1/environ | grep TAVUS'
 lives in a named volume so the container's Linux binaries are not shadowed by
 the host's macOS ones; rebuilding the image alone will not refresh it.
 
+### Docker Desktop on Windows
+
+**`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`**
+
+Usually shown as `unable to get image 'git-hired-frontend'`, which is
+misleading — the image is fine. The CLI cannot reach the Docker engine at all,
+so nothing in this repo has run yet. The named pipe only exists while Docker
+Desktop's Linux engine is running. In order of likelihood:
+
+1. **Docker Desktop is not running.** Start it and wait for the whale icon to
+   report *Engine running* — the CLI works before the engine is fully up, and
+   fails exactly like this. Confirm with `docker version`: a Server section
+   means you are ready.
+2. **It is in Windows-containers mode.** Right-click the tray icon → *Switch to
+   Linux containers*. This repo's images are Linux-only.
+3. **The wrong context is selected.** `docker context ls`, then
+   `docker context use desktop-linux`.
+4. **WSL 2 is broken or out of date.** `wsl --update`, then `wsl --status`.
+   Docker Desktop needs the WSL 2 backend (Settings → General → *Use the WSL 2
+   based engine*).
+5. **Your account is not in the `docker-users` group**, or virtualization is
+   disabled in BIOS/UEFI. Both prevent the engine from starting; Docker Desktop
+   normally says so on launch.
+
+Quick check that the daemon is actually reachable:
+
+```powershell
+docker version
+docker run --rm hello-world
+```
+
+Until `hello-world` succeeds, no `docker compose` command in this repo can work.
+
+**`/usr/bin/env: 'bash\r': No such file or directory`**
+
+The entrypoint was checked out with CRLF line endings — Git on Windows defaults
+to `core.autocrlf=true`, and a Linux shebang cannot survive a carriage return.
+`.gitattributes` pins `*.sh` to LF and the Dockerfile strips CR during the build,
+so this should not happen; if it does, your working copy predates
+`.gitattributes`:
+
+```powershell
+git rm --cached -r .
+git reset --hard
+docker compose build --no-cache backend
+```
+
+**Ports 5173 or 8100 refuse to bind.** Windows reserves dynamic port ranges for
+Hyper-V, and a reserved range will reject a bind with a permissions error even
+though nothing is listening. Check with `netsh interface ipv4 show excludedportrange protocol=tcp`,
+and change the published port in `docker-compose.yml` if one of them is inside a
+reserved block.
+
+**Backend hot reload does not notice edits.** Bind mounts across the
+Windows/Linux boundary do not deliver inotify events. watchfiles detects WSL and
+switches to polling by itself; if it misses yours, set
+`WATCHFILES_FORCE_POLLING=1` in the environment before `docker compose up`.
+Vite already polls unconditionally.
+
 **`pynput` is not installed in the image.** It builds `evdev` from source on
 Linux, and the module that imports it is deliberately not wired into the backend
 anyway — it watches the keyboard of the machine it runs on, which in a container

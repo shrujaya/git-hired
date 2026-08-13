@@ -19,9 +19,10 @@ The work landed in three batches:
 | **9** | Exact colour + motion values taken from the second mock (§20), email diagnosis (§21) | Committed as [`1c6deb7`](https://github.com/shrujaya/git-hired/commit/1c6deb7) |
 | **10** | PDF reports, a cover sheet before the flow, fullscreen that works, bring-your-own job description, one logs root (§22–§26) | Committed as [`a83ef39`](https://github.com/shrujaya/git-hired/commit/a83ef39) |
 | **11** | Proctoring signals reach the report (§27) | Committed as [`84e2671`](https://github.com/shrujaya/git-hired/commit/84e2671) |
-| **12** | Apache-2.0 (§28), `docker compose` with automatic tunnel-URL injection (§29), README cut from 1,089 to 233 lines (§30) | Uncommitted working tree |
+| **12** | Apache-2.0 (§28), `docker compose` with automatic tunnel-URL injection (§29), README cut from 1,089 to 233 lines (§30) | Committed as [`ba94f08`](https://github.com/shrujaya/git-hired/commit/ba94f08) |
+| **13** | Windows 11 support for the container path (§29, *Windows 11*) | Uncommitted working tree |
 
-`git diff 2f346e3` reproduces all twelve batches together.
+`git diff 2f346e3` reproduces all thirteen batches together.
 
 > **Correction.** §10 previously described a per-turn transcript autosave as
 > part of batch 3. It was not in `cbc3096` — the section described work that
@@ -1436,7 +1437,7 @@ confirming the section renders with the intended tone.
 
 ## 28. Apache-2.0
 
-*(Batch 12 — uncommitted)*
+*(Batch 12 — committed as `ba94f08`)*
 
 The repository had no licence file; the README said only "provided as-is for
 educational and commercial use", which grants nothing in particular and leaves
@@ -1465,7 +1466,7 @@ own commit.
 
 ## 29. `docker compose up`, and the end of pasting tunnel URLs
 
-*(Batch 12 — uncommitted)*
+*(Batch 12 — committed as `ba94f08`)*
 
 Three services — `frontend`, `backend`, `tunnel` — on one network, started with
 one command. The point is not packaging; it is deleting a manual step that had
@@ -1537,6 +1538,55 @@ own CLI flags. The token is now passed explicitly, from a root `.env`.
   on Docker Desktop do not deliver inotify events.
 - `ENABLE_AVATAR=false` skips tunnel discovery entirely instead of waiting 90s.
 
+### Windows 11
+
+*(Batch 13 — uncommitted; the rest of §29 shipped in `ba94f08`)*
+
+`docker compose up` is the same command; the differences are all in what the
+host does to the files on the way in.
+
+**CRLF is the one that actually breaks.** Git on Windows defaults to
+`core.autocrlf=true`, and a shell script checked out with CRLF dies at the
+shebang inside a Linux image — reproduced deliberately to confirm the message
+collaborators will search for:
+
+```
+/usr/bin/env: 'bash\r': No such file or directory
+```
+
+Fixed in two layers, because one is not enough. A new
+[`.gitattributes`](.gitattributes) pins `*.sh`, Dockerfiles, compose files and
+`.env.example` to LF — but `.gitattributes` only governs *checkout*, so anyone
+who cloned before it existed still has CRLF on disk. The Dockerfile therefore
+also strips CR from the entrypoint before `chmod +x`, which was verified to turn
+the failure above into a clean run from a deliberately CRLF file.
+
+`.ps1`, `.bat` and `.cmd` are pinned to **CRLF** in the same file — their
+consumer is PowerShell, not a container.
+
+**CRLF in `server/.env` is a non-issue**, tested rather than assumed: both
+`docker run --env-file` and compose's own `env_file` parser strip the carriage
+return, so a value does not silently gain a trailing `\r`.
+
+`build.platforms` was replaced by the service-level `platform: linux/amd64`.
+Compose applies it to the build as well, and the single-platform form avoids
+buildx's multi-platform exporter, which cannot always load a built image into
+the local store. On Windows and Intel this is native — only Apple Silicon pays
+for emulation.
+
+`WATCHFILES_FORCE_POLLING` is exposed and left empty. watchfiles detects WSL and
+switches to polling by itself, which should cover Docker Desktop; the variable
+is the escape hatch if it does not, and defaulting it to empty means no one else
+pays for polling. Vite already polls unconditionally.
+
+Documented but not fixable in the repo: Docker Desktop must be running with the
+**WSL 2 backend** in **Linux containers** mode, and cloning into the WSL 2
+filesystem rather than `C:\` avoids slow cross-boundary bind mounts. The
+`npipe:////./pipe/dockerDesktopLinuxEngine` connection error — which surfaces
+misleadingly as `unable to get image '…'` — is an engine that is not running,
+not a repository problem; it is written up in
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+
 Verified end to end: tunnel discovery, public routing, the `401`, PAL-cache
 hit/miss/corrupt-file behaviour, stale-PAL clearing, secret generation and
 reuse, both hot-reload paths, and a full restart picking up a new hostname
@@ -1550,7 +1600,7 @@ the quick tunnel with a named one — then `TAVUS_PAL_ID` can be pinned again.
 
 ## 30. The README was 1,089 lines
 
-*(Batch 12 — uncommitted)*
+*(Batch 12 — committed as `ba94f08`)*
 
 Long enough that the answer to "what is this and how do I start it" was buried
 under Windows PowerShell execution policies. Now **233 lines**: what Git-Hired

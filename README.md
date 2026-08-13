@@ -70,6 +70,28 @@ cp server/.env.example server/.env    # add ANTHROPIC_API_KEY, and TAVUS_API_KEY
 docker compose up --build
 ```
 
+<details>
+<summary>Windows 11</summary>
+
+Identical, except for copying the env file:
+
+```powershell
+copy server\.env.example server\.env
+docker compose up --build
+```
+
+Requires **Docker Desktop with the WSL 2 backend** and Docker set to **Linux
+containers** (the default). If `docker compose` reports it cannot connect to
+`npipe:////./pipe/dockerDesktopLinuxEngine`, Docker Desktop is not running or is
+in Windows-containers mode — see
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#docker-desktop-on-windows).
+
+The backend image is `linux/amd64`, which is native here — builds are quicker
+than on Apple Silicon. For noticeably faster file access, clone into the WSL 2
+filesystem (`\\wsl$\Ubuntu\home\...`) rather than `C:\`; bind mounts across the
+Windows/Linux boundary are slow.
+</details>
+
 | Service | URL |
 |---|---|
 | Frontend | <http://localhost:5173> |

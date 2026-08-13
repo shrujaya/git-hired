@@ -49,7 +49,14 @@ RUN python -c "import mediapipe as mp; mp.solutions.face_mesh.FaceMesh(max_num_f
 
 COPY server ./server
 COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint
-RUN chmod +x /usr/local/bin/backend-entrypoint
+
+# Strip CR before making it executable. .gitattributes pins this file to LF, but
+# that only applies to a fresh checkout - a Windows clone made before it existed
+# still has CRLF on disk, and the failure is baffling if you have not seen it:
+#   /usr/bin/env: 'bash\r': No such file or directory
+# Normalising here makes the image build correctly from any working copy.
+RUN sed -i 's/\r$//' /usr/local/bin/backend-entrypoint \
+    && chmod +x /usr/local/bin/backend-entrypoint
 
 # server.py runs uvicorn with reload=True, which re-imports the app by name and
 # only resolves from the directory holding it.

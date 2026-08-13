@@ -43,10 +43,12 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-      # mediapipe ships no linux/arm64 wheel. On Apple Silicon this runs under
-      # Rosetta - fine here, because face tracking handles 2 frames/second.
-      platforms:
-        - linux/amd64
+    # mediapipe ships no linux/arm64 wheel, so the image is amd64 everywhere.
+    # Native on Windows and Intel machines; on Apple Silicon it runs under
+    # Rosetta, which is fine because face tracking handles 2 frames/second.
+    # Declared on the service rather than under build.platforms: compose applies
+    # it to both, and the single-platform form avoids the multi-platform
+    # exporter, which cannot always load a built image into the local store.
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -66,6 +68,11 @@ services:
       # fresh one each time. Keyed by tunnel URL, so it self-invalidates.
       TAVUS_PAL_CACHE: /state/tavus-pal.json
       STATE_DIR: /state
+      # Escape hatch for uvicorn's reloader. watchfiles already switches itself
+      # to polling when it detects WSL, which covers Docker Desktop on Windows;
+      # set this to 1 if backend hot reload still misses your edits. Left empty
+      # it means "auto", so nobody pays for polling who does not need it.
+      WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-}
     ports:
       - "8100:8100"
     volumes:
