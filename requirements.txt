@@ -1,12 +1,35 @@
-anthropic
-python-dotenv
-numpy
-fastapi
-uvicorn
-pydantic
-requests
-json
-mediapipe
-opencv-python
-pynput
-base64
+# Python dependencies for the Git-Hired backend.
+# Install via ./setup.sh, or manually into a virtualenv:
+#   python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# Requires Python 3.9-3.12 (mediapipe publishes no wheels for 3.13+).
+
+# API framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+python-multipart>=0.0.6
+pydantic>=2.0.0
+
+# Claude
+anthropic>=0.39.0
+
+# Tavus avatar HTTP client
+aiohttp>=3.9.0
+
+# Eye/face tracking over the /ws/video websocket
+mediapipe==0.10.21
+opencv-python>=4.8.0
+# mediapipe 0.10.21 breaks at import time on protobuf 5.x with
+# "RuntimeError: Failed to parse: node {". Keep protobuf on 4.x.
+protobuf>=4.25.3,<5
+
+# Input tracking
+pynput>=1.7.6
+
+# Interview report PDF (emailed to the manager). Pure Python - no system
+# libraries to install, unlike weasyprint/wkhtmltopdf.
+reportlab>=4.0
+
+# Config
+python-dotenv>=1.0.0

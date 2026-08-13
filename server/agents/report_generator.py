@@ -19,6 +19,9 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import config
 from prompts.agent_prompts import get_report_generator_prompt
+from agents.response_utils import first_text
+from agents.report_pdf import render_report_pdf
+from agents.proctoring import ProctoringLog, summary_to_report_section
 
 
 class ReportGeneratorAgent:
@@ -50,7 +53,8 @@ class ReportGeneratorAgent:
         job_role: str,
         interview_date: str,
         interview_duration: int,
-        resume_analysis: str
+        resume_analysis: str,
+        proctoring_summary: str = ""
     ) -> Dict[str, Any]:
         """
         Generate comprehensive interview report
@@ -63,7 +67,8 @@ class ReportGeneratorAgent:
             interview_date: Date of interview
             interview_duration: Duration in minutes
             resume_analysis: Resume analysis text
-            
+            proctoring_summary: Integrity observations, as plain text
+
         Returns:
             Dictionary with report and metadata
         """
@@ -77,21 +82,21 @@ class ReportGeneratorAgent:
             job_role=job_role,
             interview_date=interview_date,
             interview_duration=interview_duration,
-            resume_analysis=resume_analysis
+            resume_analysis=resume_analysis,
+            proctoring_summary=proctoring_summary
         )
-        
+
         # Generate report
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=4096,
-            temperature=0.5,
+            max_tokens=8192,
             messages=[{
                 "role": "user",
                 "content": prompt
             }]
         )
         
-        report_text = response.content[0].text
+        report_text = first_text(response)
         
         print("✅ Report generated successfully!")
         
@@ -123,7 +128,7 @@ class ReportGeneratorAgent:
         """
         # Create reports directory
         reports_dir = config.reports_dir / session_id
-        reports_dir.mkdir(exist_ok=True)
+        reports_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -147,7 +152,7 @@ class ReportGeneratorAgent:
         
         # Also save in logs directory for consistency
         log_dir = config.logs_dir / session_id
-        log_dir.mkdir(exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
         log_report_file = log_dir / "interview_report.md"
         with open(log_report_file, 'w', encoding='utf-8') as f:
             f.write(f"# Interview Report: {report_data['candidate_name']}\n\n")
@@ -158,9 +163,23 @@ class ReportGeneratorAgent:
             f.write("---\n\n")
             f.write(report_data['report'])
         
+        # PDF — this is what the manager is emailed. A Markdown attachment
+        # opens as raw text in most mail clients.
+        pdf_file = reports_dir / f"interview_report_{candidate_name_safe}_{timestamp}.pdf"
+        try:
+            render_report_pdf(report_data, pdf_file)
+            print(f"📁 Report saved to: {pdf_file}")
+        except Exception as e:
+            # The Markdown and JSON are already on disk, so a rendering
+            # problem must not lose the report - fall back to emailing the
+            # Markdown rather than sending nothing.
+            print(f"⚠️  PDF rendering failed ({type(e).__name__}: {e}); "
+                  f"falling back to Markdown")
+            pdf_file = None
+
         print(f"📁 Report saved to: {report_file}")
-        
-        return report_file
+
+        return pdf_file or report_file
     
     def send_email(
         self,
@@ -225,9 +244,12 @@ AI Interview System
             
             msg.attach(MIMEText(body, 'plain'))
             
-            # Attach report file
+            # Attach report file. The subtype matters: sent as
+            # octet-stream a PDF arrives as an unknown blob rather than
+            # something the client will preview inline.
+            subtype = 'pdf' if report_file.suffix.lower() == '.pdf' else 'octet-stream'
             with open(report_file, 'rb') as f:
-                part = MIMEBase('application', 'octet-stream')
+                part = MIMEBase('application', subtype)
                 part.set_payload(f.read())
                 encoders.encode_base64(part)
                 part.add_header(
@@ -244,9 +266,25 @@ AI Interview System
             
             print("✅ Email sent successfully!")
             return True
-            
+
+        except smtplib.SMTPAuthenticationError as e:
+            # By far the most common failure, and the least self-explanatory:
+            # the report has already been written by this point, so without
+            # naming the cause it looks like the interview simply produced no
+            # email. Gmail stopped accepting account passwords over SMTP in
+            # 2022 and requires a 16-character App Password.
+            print(f"❌ Email rejected by {config.email.smtp_server}: {e.smtp_code} "
+                  f"{e.smtp_error.decode(errors='replace').strip()}")
+            if "gmail" in config.email.smtp_server.lower():
+                print("   Gmail needs a 16-character App Password (2-Step "
+                      "Verification must be on), not the account password.")
+                print("   Create one: https://myaccount.google.com/apppasswords")
+            print(f"   The report is still saved: {report_file}")
+            return False
+
         except Exception as e:
-            print(f"❌ Failed to send email: {e}")
+            print(f"❌ Failed to send email: {type(e).__name__}: {e}")
+            print(f"   The report is still saved: {report_file}")
             return False
     
     def generate_and_send_report(
@@ -287,7 +325,9 @@ AI Interview System
         # Get interview duration
         transcript_json_file = session_dir / "interview_transcript.json"
         if transcript_json_file.exists():
-            with open(transcript_json_file, 'r') as f:
+            # Explicit encoding: the transcript is UTF-8, but Windows would
+            # otherwise decode it as cp1252 and fail on any non-ASCII answer.
+            with open(transcript_json_file, 'r', encoding='utf-8') as f:
                 transcript_data = json.load(f)
                 # Calculate duration from timestamps
                 if transcript_data.get('transcript'):
@@ -299,6 +339,14 @@ AI Interview System
         else:
             duration = 30  # Default
         
+        # Integrity observations, if the session recorded any. Read off disk
+        # rather than passed in: the report runs in a background task after
+        # the response has gone out, and /api/interview/end saves this file
+        # immediately before queueing it.
+        proctoring_summary = summary_to_report_section(
+            ProctoringLog.load_summary(session_id)
+        )
+
         # Generate report
         report_data = self.generate_report(
             interview_transcript=transcript,
@@ -307,6 +355,7 @@ AI Interview System
             job_role=job_role,
             interview_date=datetime.now().strftime("%Y-%m-%d"),
             interview_duration=duration,
+            proctoring_summary=proctoring_summary,
             resume_analysis=resume_analysis
         )
         

@@ -1,85 +1,71 @@
-// src/pages/LandingPage.tsx - COMPACT VERSION
+// src/pages/LandingPage.tsx
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import {
-  Upload,
-  FileText,
-  CheckCircle,
-  ArrowRight,
-  Briefcase,
-  Code,
-  Palette,
-  Database,
-  Cpu,
-  Cloud,
-  X,
-  Sparkles,
-  Zap,
-  Target,
-  Loader2,
-} from "lucide-react";
-import { 
-  convertPdfToBase64, 
-  formatJobDescription, 
+  convertPdfToBase64,
+  formatJobDescription,
   initializeSession,
-  storeSessionData 
+  extractJobDescriptionFromPdf,
+  storeSessionData
 } from "../utils/api.utils";
+import FlowHeader from "../components/FlowHeader";
+import { useFullscreen } from "../hooks/useFullscreen";
 
 const JOB_TYPES = [
   {
     id: "frontend",
     title: "Frontend Developer",
-    icon: Code,
     description:
       "Build responsive user interfaces using React, Vue, or Angular. Create seamless experiences with clean, maintainable code.",
     skills: ["React", "TypeScript", "CSS", "JavaScript"],
     level: "Mid-Senior",
-    color: "from-blue-500 to-cyan-500"
   },
   {
     id: "backend",
     title: "Backend Developer",
-    icon: Database,
     description:
       "Design server-side logic, databases, and APIs. Build scalable and secure backend systems with modern technologies.",
     skills: ["Node.js", "Python", "SQL", "REST APIs"],
     level: "Mid-Senior",
-    color: "from-blue-600 to-indigo-600"
   },
   {
     id: "fullstack",
     title: "Full Stack Developer",
-    icon: Cpu,
     description:
       "Work on both frontend and backend. Build complete web applications from database to user interface.",
     skills: ["React", "Node.js", "MongoDB", "TypeScript"],
     level: "Senior",
-    color: "from-cyan-500 to-blue-600"
   },
   {
     id: "devops",
     title: "DevOps Engineer",
-    icon: Cloud,
     description:
       "Manage CI/CD pipelines, cloud infrastructure, and deployment automation. Ensure system reliability and scalability.",
     skills: ["AWS", "Docker", "Kubernetes", "Jenkins"],
     level: "Mid-Senior",
-    color: "from-blue-500 to-teal-500"
   },
   {
     id: "uiux",
     title: "UI/UX Designer",
-    icon: Palette,
     description:
       "Create beautiful, intuitive interfaces. Design wireframes, prototypes, and high-fidelity mockups.",
     skills: ["Figma", "Adobe XD", "Prototyping", "Design Systems"],
     level: "Mid",
-    color: "from-cyan-400 to-blue-500"
   },
 ];
 
+// The sixth option is not a role, it is a way to supply one. Kept out of
+// JOB_TYPES so nothing that iterates the real roles has to special-case it.
+const CUSTOM_ROLE_ID = "custom";
+
+// Enough text to actually brief an interviewer. A one-line "backend dev"
+// produces questions no better than picking a listed role would.
+const MIN_JD_CHARS = 120;
+
 function LandingPage() {
   const navigate = useNavigate();
+  const { enterFullscreen } = useFullscreen();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedJobType, setSelectedJobType] = useState<string>("");
@@ -87,8 +73,22 @@ function LandingPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const canProceed = selectedFile !== null && selectedJobType !== "";
+  // Custom role: the candidate supplies the job description themselves.
+  const [customTitle, setCustomTitle] = useState("");
+  const [customJd, setCustomJd] = useState("");
+  const [jdFileName, setJdFileName] = useState("");
+  const [isReadingJd, setIsReadingJd] = useState(false);
+  const [jdError, setJdError] = useState("");
+
+  const isCustom = selectedJobType === CUSTOM_ROLE_ID;
   const selectedJob = JOB_TYPES.find((job) => job.id === selectedJobType);
+  const customReady =
+    customTitle.trim().length > 1 && customJd.trim().length >= MIN_JD_CHARS;
+
+  const canProceed =
+    selectedFile !== null &&
+    selectedJobType !== "" &&
+    (isCustom ? customReady : true);
 
   // File handlers
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,8 +131,59 @@ function LandingPage() {
     setError("");
   };
 
+  // Attached job description. Plain text is read here; a PDF goes to the
+  // backend, which already reads PDFs for resumes — the browser has no PDF
+  // parser and shipping one would grow a bundle that is already oversized.
+  // Either way the text lands in the box so it can be checked and edited
+  // before the interview is built from it.
+  const handleJdFile = async (file: File | undefined) => {
+    if (!file) return;
+    setJdError("");
+
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    const isText = /\.(txt|md|markdown)$/i.test(file.name) || file.type.startsWith("text/");
+    if (!isPdf && !isText) {
+      setJdError("Attach a PDF or a text file, or paste the description below.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setJdError("File size must be less than 10MB");
+      return;
+    }
+
+    setIsReadingJd(true);
+    try {
+      const text = isPdf
+        ? await extractJobDescriptionFromPdf(await convertPdfToBase64(file))
+        : await file.text();
+
+      if (!text.trim()) {
+        setJdError("That file looks empty. Paste the description instead.");
+        return;
+      }
+      setCustomJd(text.trim());
+      setJdFileName(file.name);
+    } catch (err) {
+      console.error("Could not read job description:", err);
+      setJdError(
+        err instanceof Error ? err.message : "Could not read that file. Paste the text instead."
+      );
+    } finally {
+      setIsReadingJd(false);
+    }
+  };
+
   const handleProceed = async () => {
     if (!canProceed) return;
+
+    // Go fullscreen here, on the click itself, and not on the interview
+    // page's mount. requestFullscreen() needs transient user activation:
+    // this click is the last one before the interview starts, and the
+    // activation does not survive the awaits below, let alone a route
+    // change. Fullscreen is document-scoped, so it carries into /interview.
+    // Deliberately not awaited — a browser that refuses must not stop the
+    // interview from starting.
+    void enterFullscreen();
 
     setIsLoading(true);
     setError("");
@@ -141,25 +192,31 @@ function LandingPage() {
       // Convert PDF to base64
       const resumeBase64 = await convertPdfToBase64(selectedFile!);
 
-      // Format job description
-      const jobDescription = formatJobDescription(selectedJob!);
+      // Format job description. A custom role is already a job description —
+      // it goes through as written rather than being rebuilt from a template.
+      const jobTitle = isCustom ? customTitle.trim() : selectedJob!.title;
+      const jobDescription = isCustom
+        ? customJd.trim()
+        : formatJobDescription(selectedJob!);
 
       // Initialize session via API
+      // The backend reads the candidate's name off the resume it receives.
       const response = await initializeSession({
         resume_base64: resumeBase64,
         job_description: jobDescription,
-        candidate_name: "Nikhil",
-        job_role: selectedJob!.title
+        job_role: jobTitle
       });
 
       // Store session data
       storeSessionData({
         resumeFileName: selectedFile!.name,
         selectedJobType: selectedJobType,
-        jobTitle: selectedJob!.title,
-        candidateName: "Nikhil",
+        jobTitle: jobTitle,
+        candidateName: response.candidate_name,
+        candidateFirstName: response.candidate_first_name,
         sessionId: response.session_id,
-        avatarUrl: response.avatar_url
+        avatarUrl: response.avatar_url,
+        avatarConversationId: response.avatar_conversation_id
       });
 
       // Navigate to interview
@@ -172,336 +229,380 @@ function LandingPage() {
     }
   };
 
-  return (
-    <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-blue-50 via-cyan-50 to-blue-100 flex flex-col relative">
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-10 w-72 h-72 bg-blue-400/20 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
-        <div className="absolute top-40 right-10 w-72 h-72 bg-cyan-400/20 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
-        <div className="absolute -bottom-8 left-1/2 w-72 h-72 bg-teal-400/20 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
-      </div>
+  const readyHint =
+    !selectedFile && !selectedJobType
+      ? "Attach a resume and pick a role to continue."
+      : !selectedFile
+      ? "Attach your resume to continue."
+      : !selectedJobType
+      ? "Pick a role to continue."
+      : isCustom && !customTitle.trim()
+      ? "Name the role you are applying for."
+      : isCustom && customJd.trim().length < MIN_JD_CHARS
+      ? `Paste or attach the job description — minimum ${MIN_JD_CHARS} characters.`
+      : `${isCustom ? customTitle.trim() : selectedJob!.title} · adaptive questions · starts immediately`;
 
-      {/* Header - More Compact */}
-      <header className="relative z-10 bg-white/80 backdrop-blur-md border-b border-blue-100 shadow-sm flex-shrink-0">
-        <div className="max-w-7xl mx-auto px-6 py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Sparkles className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <h1 className="text-base font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                  Git Hired
-                </h1>
-                <p className="text-[10px] text-gray-600 flex items-center gap-1">
-                  <Zap className="w-2.5 h-2.5 text-yellow-500" />
-                  Powered by Claude AI
-                </p>
-              </div>
+  const resumeExt = selectedFile
+    ? (selectedFile.name.split(".").pop() || "pdf").toUpperCase().slice(0, 4)
+    : "";
+  const resumeSize = selectedFile
+    ? selectedFile.size / 1024 > 1024
+      ? (selectedFile.size / 1024 / 1024).toFixed(1) + " MB"
+      : Math.max(1, Math.round(selectedFile.size / 1024)) + " KB"
+    : "";
+
+  return (
+    <div className="min-h-screen sheet text-ink flex flex-col">
+      <FlowHeader step={2} />
+
+      {/* Session-init loader. Resume analysis is a real Claude round trip, so
+          this can take a while — say so instead of leaving a frozen button. */}
+      {isLoading && (
+        <div className="fixed inset-0 z-50 bg-paper/95 backdrop-blur-sm flex items-center justify-center px-6">
+          <div className="w-[440px] max-w-full border-2 border-ink bg-card p-8 animate-fadeup">
+            <div className="flex items-center gap-2.5 mb-5">
+              <span className="w-2 h-2 bg-signal animate-recblink" />
+              <span className="font-mono text-[9.5px] tracking-[0.14em] uppercase text-inksub">
+                Processing
+              </span>
             </div>
-            <div className="flex items-center gap-2 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50" />
-              <span className="text-xs font-medium text-green-700">System Ready</span>
+            <h2 className="font-display font-extrabold text-[26px] tracking-title leading-none mb-3">
+              Preparing your interview
+            </h2>
+            <p className="text-[14px] leading-relaxed text-inksub mb-5">
+              We're reading your resume and briefing your interviewer on
+              {" "}{selectedJob?.title ?? "the role"}. This usually takes under a
+              minute — please keep this tab open.
+            </p>
+            <div className="font-mono text-[9.5px] tracking-[0.08em] uppercase text-inkfaint border-t border-rule pt-3">
+              analyzing resume · building question plan · starting avatar
             </div>
           </div>
         </div>
-      </header>
+      )}
 
-      {/* Main content area - Super Compact */}
-      <main className="relative z-10 flex-1 flex items-center justify-center px-4 py-2 overflow-hidden">
-        <div className="w-full max-w-7xl">
-          {/* Hero Section - Ultra Compact */}
-          <div className="text-center mb-2.5">
-            <div className="inline-flex items-center gap-1.5 bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full text-[10px] font-semibold mb-1.5">
-              <Target className="w-2.5 h-2.5" />
-              Get Hired Faster with AI
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-1 leading-tight">
-              Welcome to Your <span className="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">AI Interview</span>
-            </h2>
-            <p className="text-xs text-gray-600">
-              Upload your resume and select your dream position to start your personalized AI-powered interview
-            </p>
-          </div>
+      <div className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-10 py-8 md:py-12 flex flex-col gap-9">
 
-          {/* Main Grid - More Compact */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-2.5">
-            {/* Left Column */}
-            <div className="space-y-2.5">
-              {/* Resume Upload Card - Compact */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl hover:shadow-2xl transition-all duration-300">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg">
-                    <FileText className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900">Upload Your Resume</h3>
-                    <p className="text-[10px] text-gray-500">PDF format, maximum 10MB</p>
-                  </div>
-                </div>
-
-                {!selectedFile ? (
-                  <div
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    className={`relative border-2 border-dashed rounded-lg p-4 text-center transition-all cursor-pointer group ${
-                      isDragging 
-                        ? "border-blue-500 bg-blue-50 scale-105" 
-                        : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50"
-                    }`}
-                  >
-                    <input 
-                      type="file" 
-                      accept=".pdf" 
-                      onChange={handleFileChange} 
-                      id="resume-upload" 
-                      className="hidden" 
-                    />
-                    <label htmlFor="resume-upload" className="cursor-pointer">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl flex items-center justify-center mx-auto mb-1.5 group-hover:scale-110 transition-transform">
-                        <Upload className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <p className="text-xs font-semibold text-gray-900 mb-0.5">
-                        Drop your resume here
-                      </p>
-                      <p className="text-[10px] text-gray-500 mb-2">
-                        or click to browse files
-                      </p>
-                      <div className="inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all">
-                        <Upload className="w-3.5 h-3.5" />
-                        Choose File
-                      </div>
-                    </label>
-                  </div>
-                ) : (
-                  <div className="relative bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-lg p-2.5 shadow-md">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg flex items-center justify-center shadow-lg flex-shrink-0">
-                          <FileText className="w-4 h-4 text-white" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-gray-900 truncate">
-                            {selectedFile.name}
-                          </p>
-                          <p className="text-[10px] text-gray-600">
-                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <div className="flex items-center gap-1 bg-green-100 px-1.5 py-0.5 rounded-lg">
-                          <CheckCircle className="w-3 h-3 text-green-600" />
-                          <span className="text-[10px] font-medium text-green-700">Uploaded</span>
-                        </div>
-                        <button 
-                          onClick={removeFile} 
-                          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {error && (
-                  <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-1.5 flex items-center gap-2">
-                    <div className="w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
-                      <X className="w-2 h-2 text-white" />
-                    </div>
-                    <p className="text-[10px] text-red-700 font-medium">{error}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Job Selection Card - Compact */}
-              <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl hover:shadow-2xl transition-all duration-300">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-                    <Briefcase className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900">Select Your Position</h3>
-                    <p className="text-[10px] text-gray-500">Choose the role you're applying for</p>
-                  </div>
-                </div>
-
-                <select
-                  value={selectedJobType}
-                  onChange={(e) => setSelectedJobType(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-lg text-xs font-medium text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all cursor-pointer hover:border-blue-300"
-                >
-                  <option value="">Select a position...</option>
-                  {JOB_TYPES.map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {j.title}
-                    </option>
-                  ))}
-                </select>
-
-                {selectedJobType && (
-                  <div className="mt-2 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 px-2.5 py-1.5 rounded-lg flex items-center gap-2">
-                    <div className="w-5 h-5 bg-green-500 rounded-lg flex items-center justify-center shadow-md">
-                      <CheckCircle className="w-3.5 h-3.5 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold text-green-700">Position Selected</p>
-                      <p className="text-[10px] text-green-600">{selectedJob?.title}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Right Column - Job Description - Compact */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-blue-100 p-3 shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col">
-              {selectedJob ? (
-                <div className="flex flex-col h-full">
-                  {/* Job Header */}
-                  <div className="flex items-start gap-2.5 pb-2 border-b border-blue-100">
-                    <div className={`w-10 h-10 bg-gradient-to-br ${selectedJob.color} rounded-xl flex items-center justify-center shadow-lg flex-shrink-0`}>
-                      <selectedJob.icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-bold text-gray-900 mb-0.5 leading-tight">
-                        {selectedJob.title}
-                      </h3>
-                      <div className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-semibold">
-                        <Zap className="w-2.5 h-2.5" />
-                        {selectedJob.level}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Description - Line clamp */}
-                  <div className="mt-2 mb-2">
-                    <h4 className="text-[10px] font-bold text-gray-900 uppercase tracking-wide mb-1">
-                      Role Overview
-                    </h4>
-                    <p className="text-xs text-gray-700 leading-relaxed line-clamp-2">
-                      {selectedJob.description}
-                    </p>
-                  </div>
-
-                  {/* Skills */}
-                  <div className="mb-2">
-                    <h4 className="text-[10px] font-bold text-gray-900 uppercase tracking-wide mb-1">
-                      Required Skills
-                    </h4>
-                    <div className="flex flex-wrap gap-1">
-                      {selectedJob.skills.map((skill) => (
-                        <span 
-                          key={skill} 
-                          className="bg-gradient-to-r from-blue-100 to-cyan-100 text-blue-700 px-2 py-0.5 rounded-lg text-[10px] font-semibold border border-blue-200"
-                        >
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Interview Focus */}
-                  <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-2 rounded-lg border border-blue-200">
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <div className="w-5 h-5 bg-blue-600 rounded-lg flex items-center justify-center">
-                        <Target className="w-2.5 h-2.5 text-white" />
-                      </div>
-                      <h4 className="text-[10px] font-bold text-gray-900">Interview Focus</h4>
-                    </div>
-                    <ul className="space-y-1">
-                      <li className="flex items-start gap-1.5">
-                        <CheckCircle className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-[10px] text-gray-700">Technical questions tailored to your resume</span>
-                      </li>
-                      <li className="flex items-start gap-1.5">
-                        <CheckCircle className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-[10px] text-gray-700">Role-specific coding challenges</span>
-                      </li>
-                      <li className="flex items-start gap-1.5">
-                        <CheckCircle className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-[10px] text-gray-700">Real-world problem-solving scenarios</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl flex items-center justify-center mx-auto mb-2">
-                      <Briefcase className="w-7 h-7 text-blue-600" />
-                    </div>
-                    <h3 className="text-sm font-bold text-gray-900 mb-0.5">
-                      Select a Position
-                    </h3>
-                    <p className="text-[10px] text-gray-500 max-w-xs mx-auto">
-                      Choose your desired role from the dropdown to view detailed job requirements
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* CTA Button - Compact */}
-          <div className="flex flex-col items-center gap-1.5">
-            <button
-              onClick={handleProceed}
-              disabled={!canProceed || isLoading}
-              className={`group relative px-6 py-2.5 rounded-xl font-bold text-sm transition-all duration-300 ${
-                canProceed && !isLoading
-                  ? "bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-xl shadow-blue-500/50 hover:shadow-2xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
-                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Initializing Interview...
-                  </>
-                ) : (
-                  <>
-                    Start Your AI Interview
-                    <ArrowRight className={`w-4 h-4 ${canProceed ? "group-hover:translate-x-1" : ""} transition-transform`} />
-                  </>
-                )}
+        {/* ---- Heading + resume ---- */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-8 lg:gap-12 items-start">
+          <div className="reveal" style={{ "--d": "0s" } as React.CSSProperties}>
+            <div className="flex items-center gap-2.5 mb-4">
+              <span className="w-2 h-2 bg-signal" />
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-inksub">
+                Fig. 2 — Role &amp; resume
               </span>
-            </button>
-            
-            {!canProceed && !isLoading && (
-              <div className="flex items-center gap-1.5 text-[10px] text-gray-600 bg-white/60 backdrop-blur-sm px-3 py-1 rounded-lg border border-gray-200">
-                <div className="w-1 h-1 bg-gray-400 rounded-full animate-pulse"></div>
-                Upload your resume and select a position to continue
+            </div>
+            <h1 className="font-display font-extrabold text-[38px] md:text-[46px] leading-[1.02] tracking-hero">
+              Choose a role,<br />attach your resume
+            </h1>
+            <span className="redline w-24 mt-5" />
+            <p className="text-[15px] leading-relaxed text-inksub max-w-[56ch] mt-4">
+              The interviewer adapts its questions to the role you pick and the
+              experience on your resume.
+            </p>
+
+            {error && (
+              <div className="mt-5 flex items-center gap-3 px-4 py-3 border-2 border-alarm bg-card">
+                <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-alarm flex-shrink-0">
+                  Err
+                </span>
+                <p className="text-[13.5px] text-ink">{error}</p>
               </div>
             )}
           </div>
-        </div>
-      </main>
 
-      <style>{`
-        @keyframes blob {
-          0%, 100% {
-            transform: translate(0px, 0px) scale(1);
-          }
-          33% {
-            transform: translate(30px, -50px) scale(1.1);
-          }
-          66% {
-            transform: translate(-20px, 20px) scale(0.9);
-          }
-        }
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-      `}</style>
+          {/* Resume card */}
+          <div
+            className="reveal border-2 border-ink bg-card p-5"
+            style={{ "--d": "0.1s" } as React.CSSProperties}
+          >
+            <div className="text-[13px] font-semibold mb-3.5">
+              Resume
+            </div>
+
+            {!selectedFile ? (
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <label
+                  className={
+                    "flex flex-col items-center gap-2 px-4 py-7 border-2 border-dashed cursor-pointer text-center transition-colors " +
+                    (isDragging
+                      ? "border-signal bg-paper"
+                      : "border-inkfaint bg-card hover:border-signal hover:bg-paper")
+                  }
+                >
+                  <span className="font-mono text-[15px] text-signal leading-none">↑</span>
+                  <div className="text-[13.5px] font-medium">
+                    Drop your resume or browse
+                  </div>
+                  <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inkfaint">
+                    PDF · max 10 MB
+                  </div>
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 px-3.5 py-3 border-2 border-ink bg-paper">
+                <div className="w-9 h-9 flex-shrink-0 bg-ink text-paper flex items-center justify-center font-mono text-[9px]">
+                  {resumeExt}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium truncate">
+                    {selectedFile.name}
+                  </div>
+                  <div className="font-mono text-[9.5px] tracking-[0.06em] uppercase text-inksub mt-1">
+                    {resumeSize} · attached
+                  </div>
+                </div>
+                <button
+                  onClick={removeFile}
+                  title="Remove resume"
+                  className="flex-shrink-0 w-[26px] h-[26px] border border-rule bg-card text-inksub text-[13px] leading-none cursor-pointer hover:text-signal hover:border-signal transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            <div className="text-[12.5px] leading-relaxed text-inkfaint mt-3.5">
+              Used only to tailor this interview. Not shared beyond the hiring
+              team for this role.
+            </div>
+          </div>
+        </div>
+
+        {/* ---- Roles ---- */}
+        <div className="reveal" style={{ "--d": "0.18s" } as React.CSSProperties}>
+          <div className="flex items-baseline justify-between mb-4 border-b-2 border-ink pb-2">
+            <div className="font-display font-bold text-[20px] tracking-sub">
+              Open roles
+            </div>
+            <div className="font-mono text-[10px] tracking-[0.1em] uppercase text-inksub">
+              {JOB_TYPES.length} available · or bring your own
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {JOB_TYPES.map((role, i) => {
+              const selected = selectedJobType === role.id;
+              return (
+                <div
+                  key={role.id}
+                  onClick={() => setSelectedJobType(role.id)}
+                  role="button"
+                  aria-pressed={selected}
+                  className={
+                    "relative px-5 pt-[18px] pb-4 cursor-pointer bg-card border-2 transition-[transform,border-color,background] duration-[180ms] ease-out hover:-translate-y-[3px] " +
+                    (selected
+                      ? "border-signal"
+                      : "border-rule hover:border-inksub")
+                  }
+                >
+                  {selected && (
+                    <span className="absolute -top-[9px] left-4 px-1.5 bg-signal font-mono text-[8.5px] tracking-[0.12em] uppercase text-black leading-4">
+                      Selected
+                    </span>
+                  )}
+                  <div className="flex items-start justify-between gap-2.5 mb-1">
+                    <div className="text-[14.5px] font-semibold tracking-[-0.012em] leading-tight">
+                      {role.title}
+                    </div>
+                    <span className="font-mono text-[9px] text-inkfaint flex-shrink-0 mt-0.5">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inksub mb-3.5">
+                    {role.level}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mb-3.5">
+                    {role.skills.map((skill) => (
+                      <div
+                        key={skill}
+                        className="px-2 py-[3px] border border-rule font-mono text-[9px] text-inksub"
+                      >
+                        {skill}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-3 border-t border-rule text-[12px] leading-relaxed text-inksub line-clamp-2">
+                    {role.description}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 06 — bring your own role */}
+            <div
+              onClick={() => setSelectedJobType(CUSTOM_ROLE_ID)}
+              role="button"
+              aria-pressed={isCustom}
+              className={
+                "relative px-5 pt-[18px] pb-4 cursor-pointer bg-card border-2 border-dashed transition-[transform,border-color,background] duration-[180ms] ease-out hover:-translate-y-[3px] " +
+                (isCustom ? "border-signal" : "border-rule hover:border-inksub")
+              }
+            >
+              {isCustom && (
+                <span className="absolute -top-[9px] left-4 px-1.5 bg-signal font-mono text-[8.5px] tracking-[0.12em] uppercase text-black leading-4">
+                  Selected
+                </span>
+              )}
+              <div className="flex items-start justify-between gap-2.5 mb-1">
+                <div className="text-[14.5px] font-semibold tracking-[-0.012em] leading-tight">
+                  Something else
+                </div>
+                <span className="font-mono text-[9px] text-inkfaint flex-shrink-0 mt-0.5">
+                  {String(JOB_TYPES.length + 1).padStart(2, "0")}
+                </span>
+              </div>
+              <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inksub mb-3.5">
+                Your own description
+              </div>
+              <div className="flex flex-wrap gap-1.5 mb-3.5">
+                {["Paste", "Attach PDF", "Attach text"].map((chip) => (
+                  <div
+                    key={chip}
+                    className="px-2 py-[3px] border border-dashed border-rule font-mono text-[9px] text-inksub"
+                  >
+                    {chip}
+                  </div>
+                ))}
+              </div>
+              <div className="pt-3 border-t border-rule text-[12px] leading-relaxed text-inksub line-clamp-2">
+                Applying for a role that is not listed? Give us the job
+                description and the questions are built from it.
+              </div>
+            </div>
+          </div>
+
+          {/* Custom role editor — only once that card is chosen */}
+          {isCustom && (
+            <div className="border-2 border-ink bg-card p-5 mt-4 animate-fadeup">
+              <div className="flex items-baseline justify-between gap-3 mb-4">
+                <div className="text-[13px] font-semibold">The role you are applying for</div>
+                <span className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inkfaint">
+                  Fig. 2a
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-3 mb-2">
+                <label className="font-mono text-[9px] tracking-[0.14em] uppercase text-inksub">
+                  Role title
+                </label>
+                <span className="font-mono text-[9px] tracking-[0.14em] uppercase text-inkfaint">
+                  Required
+                </span>
+              </div>
+              <input
+                type="text"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="e.g. Machine Learning Engineer"
+                className="w-full px-3.5 py-2.5 bg-paper border-2 border-rule focus:border-signal focus:outline-none text-[13.5px] text-ink placeholder:text-inkfaint transition-colors"
+              />
+              {/* Said here, next to the empty field, and not only in the hint
+                  under the Start button — a description long enough to start
+                  with and a blank title looks like the button is broken. */}
+              {customJd.trim().length >= MIN_JD_CHARS && !customTitle.trim() && (
+                <p className="text-[12px] text-inksub mt-2">
+                  Name the role to start — the description alone does not say
+                  what you are interviewing for.
+                </p>
+              )}
+
+              <div className="flex items-baseline justify-between gap-3 mt-5 mb-2">
+                <label className="font-mono text-[9px] tracking-[0.14em] uppercase text-inksub">
+                  Job description
+                </label>
+                <label
+                  className={
+                    "font-mono text-[9px] tracking-[0.12em] uppercase px-2.5 py-1.5 border cursor-pointer transition-colors " +
+                    (isReadingJd
+                      ? "border-rule text-inkfaint cursor-wait"
+                      : "border-rule text-inksub hover:border-signal hover:text-signal")
+                  }
+                >
+                  {isReadingJd ? "Reading…" : "↑ Attach a file"}
+                  <input
+                    type="file"
+                    accept=".pdf,.txt,.md,.markdown,text/plain,application/pdf"
+                    disabled={isReadingJd}
+                    onChange={(e) => {
+                      handleJdFile(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <textarea
+                value={customJd}
+                onChange={(e) => setCustomJd(e.target.value)}
+                rows={8}
+                placeholder="Paste the job description here — responsibilities, requirements, the stack. The more specific it is, the more specific your questions will be."
+                className="w-full px-3.5 py-3 bg-paper border-2 border-rule focus:border-signal focus:outline-none text-[13px] leading-relaxed text-ink placeholder:text-inkfaint resize-y transition-colors"
+              />
+
+              {jdError && (
+                <div className="flex items-center gap-3 px-3.5 py-2.5 border-2 border-alarm bg-paper mt-3">
+                  <span className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-alarm flex-shrink-0">
+                    Err
+                  </span>
+                  <p className="flex-1 text-[12.5px] text-ink">{jdError}</p>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
+                <div className="font-mono text-[9.5px] tracking-[0.08em] uppercase text-inkfaint">
+                  {jdFileName ? `Read from ${jdFileName} · editable` : "Paste, or attach a file"}
+                </div>
+                {/* 120 is a floor, not a ceiling — there is no maximum. Read
+                    as "X / 120" it looked like a cap being exceeded. */}
+                <div
+                  className={
+                    "font-mono text-[9.5px] tracking-[0.08em] uppercase " +
+                    (customJd.trim().length >= MIN_JD_CHARS ? "text-signal" : "text-inkfaint")
+                  }
+                >
+                  {customJd.trim().length >= MIN_JD_CHARS
+                    ? `${customJd.trim().length.toLocaleString()} characters`
+                    : `Minimum ${MIN_JD_CHARS} characters`}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ---- Footer CTA ---- */}
+        <div
+          className="reveal flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t-2 border-ink pt-5 pb-4"
+          style={{ "--d": "0.26s" } as React.CSSProperties}
+        >
+          <div className="font-mono text-[10px] tracking-[0.08em] uppercase text-inksub">
+            {readyHint}
+          </div>
+          <button
+            onClick={handleProceed}
+            disabled={!canProceed || isLoading}
+            className={
+              "px-8 py-4 text-[14.5px] font-semibold tracking-[-0.005em] transition-colors flex items-center justify-center gap-2 " +
+              (canProceed && !isLoading
+                ? "bg-signal hover:bg-signal-dark text-black cursor-pointer border-2 border-signal"
+                : "bg-transparent text-inkfaint border-2 border-rule cursor-not-allowed")
+            }
+          >
+            {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {isLoading ? "Preparing…" : "Start interview →"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -17,10 +17,18 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5
 )
 
-# Log file setup
-log_dir = "./server/src/logs"
+# Log file setup.
+#
+# Anchored to this file, not the working directory: the old "./server/src/logs"
+# resolved against wherever the script happened to be launched from, which
+# scattered half-full log directories across the repo. Matches TRACKING_DIR in
+# config/settings.py, and is the same file the server writes when it does the
+# tracking over the websocket.
+from pathlib import Path
+
+log_dir = Path(__file__).resolve().parents[1] / "logs" / "tracking"
 os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, "eye_tracking_log.jsonl")
+log_file = os.path.join(log_dir, "eye_tracking.jsonl")
 
 def write_log(event_type, duration=None):
     log_entry = {

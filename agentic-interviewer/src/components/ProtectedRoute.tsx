@@ -1,6 +1,6 @@
 // src/components/RouteProtection.tsx
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 
 interface RouteProtectionProps {
   children: React.ReactNode;
@@ -93,10 +93,20 @@ export const ProtectResultsPage: React.FC<RouteProtectionProps> = ({ children })
 // Prevents re-accessing after completion
 // ============================================
 export const ProtectTestPage: React.FC<RouteProtectionProps> = ({ children }) => {
+  const location = useLocation();
   const hasCompletedCameraCheck = sessionStorage.getItem('cameraCheckCompleted') === 'true';
   const resumeFileName = sessionStorage.getItem('resumeFileName');
   const selectedJobType = sessionStorage.getItem('selectedJobType');
   const interviewCompleted = sessionStorage.getItem('interviewCompleted') === 'true';
+
+  // Asked for the cover sheet on purpose — the brand mark in the header.
+  // Without this the forwarding below sends a candidate who has already
+  // passed the device check straight back to where they came from, and the
+  // logo looks broken. Going back is safe: it only moves them earlier in the
+  // flow, and nothing they have entered is cleared.
+  if ((location.state as { home?: boolean } | null)?.home) {
+    return <>{children}</>;
+  }
 
   // If interview completed, go to results
   if (interviewCompleted) {

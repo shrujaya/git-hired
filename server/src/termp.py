@@ -16,6 +16,6 @@ message = client.messages.create(
             "content": "Hello, Claude",
         }
     ],
-    model="claude-sonnet-4-5-20250929",
+    model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"),
 )
 print(message.content)

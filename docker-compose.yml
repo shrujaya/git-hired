@@ -1,0 +1,120 @@
+# Git-Hired, end to end, on one machine.
+#
+#   cp server/.env.example server/.env   # add ANTHROPIC_API_KEY + TAVUS_API_KEY
+#   docker compose up --build
+#
+#   Frontend  http://localhost:5173
+#   Backend   http://localhost:8100  (docs at /docs)
+#
+# The tunnel URL is discovered at boot and injected into the backend by
+# docker/backend-entrypoint.sh - TAVUS_LLM_BASE_URL in server/.env is ignored
+# and can be left blank.
+
+name: git-hired
+
+services:
+  # --- public ingress ------------------------------------------------------
+  # Tavus calls into the backend for every interviewer line, so the backend
+  # needs a public address. This is a "quick tunnel": no Cloudflare account,
+  # no DNS, and a throwaway *.trycloudflare.com hostname per boot.
+  #
+  # For a hostname that survives restarts, add the named-tunnel override:
+  #   docker compose -f docker-compose.yml -f docker-compose.named-tunnel.yml up
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      # The metrics server is how the backend learns the generated hostname
+      # (GET /quicktunnel). Bound to 0.0.0.0 so it is reachable from the
+      # backend container - it stays on the compose network, unpublished.
+      - --metrics
+      - 0.0.0.0:2000
+      - --url
+      - http://backend:8100
+    networks:
+      - git-hired
+    # cloudflared starts fine before the backend does; requests just 502 until
+    # uvicorn is listening, which is over long before anyone opens the page.
+
+  # --- FastAPI + agents ----------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    # mediapipe ships no linux/arm64 wheel, so the image is amd64 everywhere.
+    # Native on Windows and Intel machines; on Apple Silicon it runs under
+    # Rosetta, which is fine because face tracking handles 2 frames/second.
+    # Declared on the service rather than under build.platforms: compose applies
+    # it to both, and the single-platform form avoids the multi-platform
+    # exporter, which cannot always load a built image into the local store.
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      - tunnel
+    # Your real configuration. Everything below in `environment:` overrides
+    # these, and only for values that must differ inside a container.
+    env_file:
+      - ./server/.env
+    environment:
+      # Containers need to accept connections from outside themselves;
+      # 127.0.0.1 from .env would only ever reach the container itself.
+      HOST: 0.0.0.0
+      PORT: "8100"
+      # Where the entrypoint polls for the generated hostname.
+      TUNNEL_METRICS_URL: http://tunnel:2000
+      # Lets the server reuse one PAL across restarts instead of creating a
+      # fresh one each time. Keyed by tunnel URL, so it self-invalidates.
+      TAVUS_PAL_CACHE: /state/tavus-pal.json
+      STATE_DIR: /state
+      # Escape hatch for uvicorn's reloader. watchfiles already switches itself
+      # to polling when it detects WSL, which covers Docker Desktop on Windows;
+      # set this to 1 if backend hot reload still misses your edits. Left empty
+      # it means "auto", so nobody pays for polling who does not need it.
+      WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-}
+    ports:
+      - "8100:8100"
+    volumes:
+      # Source mounted live so uvicorn's reloader picks up edits, and so
+      # transcripts and reports land on the host instead of dying with the
+      # container.
+      - ./server:/app/server
+      # Generated secret + PAL cache. A named volume, so `docker compose down`
+      # keeps them and `down -v` deliberately clears them.
+      - backend_state:/state
+    networks:
+      - git-hired
+
+  # --- Vite dev server -----------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # The browser runs on the host, not in this container, so it reaches the
+      # backend through the published port - not through the compose network.
+      VITE_API_BASE_URL: http://localhost:8100
+      # Bind-mounted source on macOS/Windows does not deliver inotify events
+      # reliably; without polling, hot reload silently stops working.
+      VITE_USE_POLLING: "1"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./agentic-interviewer:/app
+      # Keeps the container's linux node_modules from being shadowed by the
+      # host's macOS ones - esbuild and rollup ship native binaries.
+      - frontend_node_modules:/app/node_modules
+    networks:
+      - git-hired
+
+networks:
+  git-hired:
+    driver: bridge
+
+volumes:
+  backend_state:
+  frontend_node_modules:

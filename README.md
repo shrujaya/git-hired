@@ -1,493 +1,255 @@
-# 🤖 Git-Hired Interviewer System
+# 🤖 Git-Hired
 
-A comprehensive, intelligent technical interview platform powered by Claude AI, featuring real-time avatar interaction via Tavus, adaptive questioning, and automated report generation.
+An AI technical interviewer that actually holds a conversation. A candidate
+uploads a résumé, picks a role, and talks to a live video avatar for ~45
+minutes. It asks ten questions, adapts the difficulty to how the answers are
+going, runs a coding exercise with hints, and emails the hiring manager a PDF
+report at the end.
 
-## 📋 Table of Contents
-
-- [Features](#features)
-- [System Architecture](#system-architecture)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [API Documentation](#api-documentation)
-- [Agents](#agents)
-- [Customization](#customization)
-- [Troubleshooting](#troubleshooting)
+The avatar is not a chatbot with a face. Tavus owns the microphone and decides
+when the candidate has finished a thought; this repo decides every word the
+interviewer says.
 
 ## ✨ Features
 
-### Core Capabilities
+- **Résumé-aware questioning** — the résumé is read against the job description
+  to pick focus areas and a starting difficulty. The candidate's name comes off
+  the PDF; nobody types it.
+- **Adaptive difficulty** — each answer is scored 0–100 and moves the next
+  question up or down.
+- **Hands-free conversation** — no push-to-talk. `sparrow-1` turn detection,
+  barge-in, and lip-synced video via Tavus.
+- **Coding round** — the editor unlocks only for the coding question. Code is
+  assessed against the candidate's own spoken explanation, with up to 3 hints
+  before moving on.
+- **Five roles, or your own** — pick a preset or paste/attach any job
+  description.
+- **Live transcript**, written to disk as the interview runs, not only at the end.
+- **Proctoring signals** — face/eye tracking, tab switches, fullscreen exits and
+  paste events, recorded per session and surfaced in the report.
+- **PDF report** emailed to the manager, with Markdown and JSON kept on disk.
+- **Graceful degradation** — if the avatar fails, the interview falls back to
+  push-to-talk with browser speech. A broken avatar never blocks an interview.
 
-- **📄 Intelligent Resume Analysis**: Automatically extracts and analyzes resume content against job descriptions
-- **🎭 Virtual AI Avatar**: Life-like interviewer avatar powered by Tavus
-- **🧠 Adaptive Questioning**: Real-time difficulty adjustment based on candidate responses
-- **💻 Code Evaluation**: Logic-focused code assessment (syntax-agnostic)
-- **📊 Automated Reporting**: Comprehensive interview reports with scoring
-- **📧 Email Integration**: Automatic report delivery to hiring managers
-- **💬 Real-time Communication**: WebSocket support for live interviews
-- **🎙️ Audio/Video Ready**: Integration with LiveKit for multimedia interviews
+## 🏗️ Architecture
 
-### Interview Flow
+```mermaid
+flowchart TB
+    UI["Frontend · React + Vite<br/>résumé upload · live transcript · code editor"]
+    TAVUS["Tavus<br/>avatar video · speech · sparrow-1 turn detection"]
+    TUNNEL(["Cloudflare tunnel<br/>public HTTPS URL"])
+    API["Backend · FastAPI<br/>sessions · REST · WebSocket · /v1/chat/completions"]
+    AGENTS["Agents<br/>Résumé Evaluator · Interviewer<br/>Code Evaluator · Report Generator"]
+    CLAUDE["Claude · claude-sonnet-5"]
+    OUT["server/logs · server/reports<br/>PDF emailed to the manager"]
 
-1. **Resume Upload Screen**
-   - Candidate uploads PDF resume
-   - Selects job role from dropdown
-   - Provides job description
-
-2. **Interview Screen**
-   - AI avatar interviewer
-   - Real-time conversation
-   - Adaptive question difficulty
-   - Integrated code editor for coding questions
-   - Live video feed of candidate
-
-3. **Automated Evaluation**
-   - Response quality assessment
-   - Code logic evaluation
-   - Comprehensive scoring
-
-4. **Report Generation**
-   - Detailed performance analysis
-   - Technical assessment scoring
-   - Hiring recommendations
-   - Email delivery to manager
-
-## 🏗️ System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Frontend (React)                        │
-│  • Resume Upload UI     • Interview Interface               │
-│  • Code Editor          • Video/Audio Controls              │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-                  │ HTTP/WebSocket
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│                   FastAPI Backend                            │
-│  • Session Management   • API Endpoints                     │
-│  • WebSocket Handler    • File Processing                   │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-        ┌─────────┼─────────┬─────────────┬──────────────┐
-        │         │         │             │              │
-┌───────▼───┐ ┌──▼────┐ ┌──▼───────┐ ┌──▼────────┐ ┌───▼──────┐
-│  Resume   │ │Interview│ │   Code   │ │  Report   │ │  Tavus   │
-│ Evaluator │ │  Agent  │ │Evaluator │ │ Generator │ │  Avatar  │
-└───────────┘ └─────────┘ └──────────┘ └───────────┘ └──────────┘
-     │             │            │              │            │
-     └─────────────┴────────────┴──────────────┴────────────┘
-                            │
-                     ┌──────▼───────┐
-                     │  Claude AI   │
-                     │  (Anthropic) │
-                     └──────────────┘
+    UI -->|"HTTP + WebSocket"| API
+    UI <-->|"WebRTC audio + video"| TAVUS
+    TAVUS -->|"what do I say next?"| TUNNEL
+    TUNNEL --> API
+    API --> AGENTS
+    AGENTS --> CLAUDE
+    AGENTS --> OUT
 ```
 
-## 🚀 Installation
+The arrow worth noticing is **Tavus → backend**. Tavus does not send us audio;
+it calls *into* this backend at `/v1/chat/completions` (OpenAI-compatible) for
+every interviewer line. That is why the backend needs a public URL, and why a
+tunnel is part of the system rather than a dev convenience.
 
-### Prerequisites
+**Interview flow:** welcome → device check → résumé + role → live interview
+(greeting → self-introduction → 10 questions, one of them coding) → automated
+evaluation → report.
 
-- Python 3.9 or higher
-- Node.js (for frontend development, optional)
-- PDF resume files
-- API keys (Anthropic, Tavus)
+## 🐳 Run it
 
-### Step 1: Clone Repository
+Everything — frontend, backend and tunnel — in one command.
 
 ```bash
-git clone <your-repo-url>
-cd ai-interviewer
+cp server/.env.example server/.env    # add ANTHROPIC_API_KEY, and TAVUS_API_KEY for the avatar
+docker compose up --build
 ```
 
-### Step 2: Install Dependencies
+<details>
+<summary>Windows 11</summary>
+
+Identical, except for copying the env file:
+
+```powershell
+copy server\.env.example server\.env
+docker compose up --build
+```
+
+Requires **Docker Desktop with the WSL 2 backend** and Docker set to **Linux
+containers** (the default). If `docker compose` reports it cannot connect to
+`npipe:////./pipe/dockerDesktopLinuxEngine`, Docker Desktop is not running or is
+in Windows-containers mode — see
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#docker-desktop-on-windows).
+
+The backend image is `linux/amd64`, which is native here — builds are quicker
+than on Apple Silicon. For noticeably faster file access, clone into the WSL 2
+filesystem (`\\wsl$\Ubuntu\home\...`) rather than `C:\`; bind mounts across the
+Windows/Linux boundary are slow.
+</details>
+
+| Service | URL |
+|---|---|
+| Frontend | <http://localhost:5173> |
+| Backend | <http://localhost:8100> (API docs at `/docs`) |
 
 ```bash
-pip install -r requirements.txt
+docker compose up               # start (no rebuild)
+docker compose logs -f backend  # watch the interview
+docker compose down             # stop, keeping the generated secret
+docker compose down -v          # stop and discard volumes too
+docker compose build            # after changing requirements.txt or package.json
 ```
 
-### Step 3: Configure Environment
+**Leave `TAVUS_LLM_BASE_URL` blank.** The `tunnel` service opens a Cloudflare
+quick tunnel and `docker/backend-entrypoint.sh` injects the resolved URL before
+the server starts, overriding anything in `server/.env` — so a stale URL from
+last session cannot win. `TAVUS_LLM_API_KEY` is generated into a Docker volume
+if unset. Everything else comes from `server/.env`, the same file the native
+setup uses.
+
+Transcripts and reports land in `server/logs/` and `server/reports/` on your
+machine, and edits to `server/` or `agentic-interviewer/src/` hot-reload.
+
+<details>
+<summary>Without Docker</summary>
+
+Needs **Python 3.9–3.12** (mediapipe publishes no 3.13+ wheels) and **Node 18+**.
 
 ```bash
-cp .env.example .env
+./setup.sh            # or .\setup.ps1 on Windows
+./run.sh backend      # → http://localhost:8100
+./run.sh frontend     # → http://localhost:5173   (second terminal)
 ```
 
-Edit `.env` and add your API keys:
+`setup.sh` creates `.venv`, installs both dependency trees, verifies the
+mediapipe/protobuf pairing loads, and seeds `server/.env`. It is idempotent.
+Use `PYTHON_OVERRIDE=/path/to/python3.12 ./setup.sh` if auto-detection misses
+your interpreter.
 
-```env
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-TAVUS_API_KEY=your_tavus_key
-TAVUS_REPLICA_ID=your_replica_id
-SENDER_EMAIL=your_email@example.com
-SENDER_PASSWORD=your_password
-MANAGER_EMAIL=manager@example.com
-```
-
-### Step 4: Run Backend Server
+For the avatar you also need a tunnel, and you must paste its URL in yourself:
 
 ```bash
-cd backend
-python server.py
+cloudflared tunnel --url http://localhost:8100
+# → TAVUS_LLM_BASE_URL=https://<printed-host>  in server/.env, then restart
 ```
+</details>
 
-Server will start at `http://localhost:8000`
+<details>
+<summary>A tunnel hostname that survives restarts</summary>
 
-### Step 5: Open Frontend
-
-Open `frontend/index.html` in your browser, or serve it:
+A quick tunnel gets a new `*.trycloudflare.com` name every boot, and a Tavus PAL
+bakes in the URL it was built with — so each boot creates a new PAL and any
+pinned `TAVUS_PAL_ID` is ignored. A named tunnel fixes this, but needs a
+Cloudflare account and a domain.
 
 ```bash
-cd frontend
-python -m http.server 3000
-```
+# in a .env at the REPO ROOT — not server/.env, which compose does not read
+# for ${...} substitution
+TUNNEL_TOKEN=eyJhIjoi...
+TUNNEL_HOSTNAME=interviews.example.com
 
-Then navigate to `http://localhost:3000`
+docker compose -f docker-compose.yml -f docker-compose.named-tunnel.yml up
+```
+</details>
 
 ## ⚙️ Configuration
 
-### Interview Settings
-
-Edit `config/settings.py` to customize:
-
-```python
-class InterviewConfig:
-    max_duration = 45  # minutes
-    warmup_questions = 2
-    core_questions = 5
-    advanced_questions = 3
-    question_timeout = 300  # seconds
-    coding_question_timeout = 600
-    max_coding_score = 10
-```
-
-### Email Settings
-
-Configure in `.env`:
+`server/.env.example` is the complete commented list; defaults live in
+`server/config/settings.py`. Nothing here requires editing Python.
 
 ```env
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SENDER_EMAIL=your_email@gmail.com
-SENDER_PASSWORD=your_app_password
-MANAGER_EMAIL=hiring@company.com
+ANTHROPIC_API_KEY=sk-ant-...   # required
+CLAUDE_MODEL=claude-sonnet-5   # the only place the model id is set
+
+WARMUP_QUESTIONS=2             # 10 questions total, one of them the coding exercise
+CORE_QUESTIONS=5
+ADVANCED_QUESTIONS=3
+MAX_INTERVIEW_DURATION=45      # minutes
+CODING_MAX_HINTS=3             # hints before the interview moves on
+
+REPLY_EFFORT=low               # main latency lever for a spoken turn
+REPLY_MAX_TOKENS=1024
+
+ENABLE_AVATAR=true             # false → push-to-talk, and Docker skips the tunnel
+ENABLE_EMAIL_NOTIFICATIONS=true
 ```
 
-**Note**: For Gmail, use an [App Password](https://support.google.com/accounts/answer/185833)
+**Avatar.** `TAVUS_FACE_ID` must be a *face* id (`r…`), not a PAL id (`p…`); it
+defaults to a Tavus stock face. Leave `TAVUS_PAL_ID` blank and the server
+provisions one. Turn-taking feel is tuned with `TAVUS_TURN_TAKING_PATIENCE` and
+`TAVUS_INTERRUPTIBILITY`.
 
-### Avatar Settings
+> **Any change to a `TAVUS_*` turn-taking value or the base URL means clearing
+> `TAVUS_PAL_ID`.** They are baked into the PAL at creation, so an existing PAL
+> keeps the old ones — including a dead tunnel URL, which makes the avatar join
+> and then sit there in silence. Under Docker this is handled for you.
 
-Create your Tavus avatar:
+**Email.** Gmail needs a **16-character App Password** from an account with
+2-Step Verification; an ordinary password is rejected with `535 … not accepted`.
+The server warns at startup if the length is wrong. The report is written to
+disk *before* the email is attempted, so a rejected login never loses it.
 
-1. Go to [tavus.io/dashboard](https://tavus.io/dashboard)
-2. Create new replica (upload 2-5 min video)
-3. Copy Replica ID to `.env`
+## 📡 API
 
-## 📖 Usage
+Full interactive docs at `/docs`.
 
-### Basic Workflow
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/session/init` | Upload résumé + job description, create the session |
+| `POST /api/job-description/extract` | Pull text out of an attached JD PDF |
+| `POST /api/interview/start` | Begin; returns the avatar URL |
+| `POST /api/interview/message` | Fallback text turn, used only when the avatar is down |
+| `POST /api/interview/code/submit` | Record a solution — deliberately returns no score |
+| `POST /api/interview/end` | Save transcript, tear down Tavus, queue the report. Idempotent |
+| `GET /api/interview/report-status/{id}` | Poll the background report job |
+| `POST /v1/chat/completions` | OpenAI-compatible — **Tavus calls this**, not the reverse |
+| `WS /ws/{session_id}` | Control channel: coding questions, hints, end-of-interview |
+| `WS /ws/video` | Camera frames for face/eye tracking |
+| `GET /health` | Liveness plus resolved feature flags |
 
-1. **Start Backend Server**
-   ```bash
-   python backend/server.py
-   ```
-
-2. **Open Frontend**
-   - Navigate to `frontend/index.html`
-
-3. **Upload Resume**
-   - Enter candidate name
-   - Select job role
-   - Paste job description
-   - Upload PDF resume
-
-4. **Conduct Interview**
-   - System analyzes resume (30-60 seconds)
-   - Avatar loads automatically
-   - Click "Begin Interview"
-   - Answer questions conversationally
-   - Submit code when prompted
-
-5. **End Interview**
-   - Click "End Interview" button
-   - Report generates automatically
-   - Email sent to manager
-
-### API Usage
-
-#### Initialize Session
-
-```bash
-curl -X POST http://localhost:8000/api/session/init \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resume_base64": "<base64_pdf>",
-    "job_description": "...",
-    "candidate_name": "John Doe",
-    "job_role": "Senior Backend Engineer"
-  }'
-```
-
-#### Start Interview
-
-```bash
-curl -X POST "http://localhost:8000/api/interview/start?session_id=<session_id>"
-```
-
-#### Send Message
-
-```bash
-curl -X POST http://localhost:8000/api/interview/message \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "<session_id>",
-    "message": "I have 5 years of Python experience..."
-  }'
-```
-
-## 📁 Project Structure
+## 📁 Layout
 
 ```
-git-hired/
-├── agents/                            # AI Agents
-│   ├── resume_evaluator.py            # Resume analysis agent
-│   ├── interviewer.py                 # Interview conductor agent
-│   ├── code_evaluator.py              # Code assessment agent
-│   └── report_generator.py            # Report creation agent
-├── backend/
-│   └── server.py                      # FastAPI server
-├── config/
-│   └── settings.py                    # Configuration management
-├── frontend/
-│   └── index.html                     # React application
-├── prompts/
-│   └── agent_prompts.py               # All agent prompts
-├── logs/                              # Interview transcripts
-│   └── <session_id>/
-│       ├── resume_analysis.txt
-│       ├── interview_transcript.txt
-│       └── code_evaluation.txt
-├── reports/                           # Generated reports
-│   └── <session_id>/
-│       └── interview_report.md
-├── requirements.txt                   # Python dependencies
-├── .env.example                       # Environment template
-└── README.md                          # This file
+server/
+  agents/        résumé_evaluator · interviewer · code_evaluator
+                 report_generator · report_pdf · proctoring
+  backend/       server.py — FastAPI app + the Tavus LLM endpoint
+  config/        settings.py — all configuration
+  prompts/       every agent prompt
+  logs/          per-session transcripts + tracking/   (gitignored)
+  reports/       generated reports                     (gitignored)
+agentic-interviewer/src/
+  pages/         Welcome · Test · Landing · Interview · Results
+  config.ts      backend URL, single source of truth
+docker/          Dockerfiles + the tunnel-resolving entrypoint
 ```
 
-## 🔧 Agents
-
-### 1. Resume Evaluator Agent
-
-**Purpose**: Analyzes resume against job description
-
-**Input**:
-- Resume PDF (base64)
-- Job description text
-
-**Output**:
-- Candidate profile summary
-- Skills match analysis
-- Interview focus areas
-- Recommended difficulty level
-- Warm-up topics
-
-**File**: `agents/resume_evaluator.py`
-
-### 2. Interviewer Agent
-
-**Purpose**: Conducts adaptive technical interview
-
-**Features**:
-- Real-time difficulty adjustment
-- Response quality evaluation
-- Adaptive questioning strategy
-- Conversation history management
-
-**Adaptive Logic**:
-- Excellent (90-100%): +2 difficulty levels
-- Good (70-89%): +1 level
-- Right direction (50-69%): Maintain level
-- Partially wrong (30-49%): -1 level
-- Wrong (0-29%): -2 levels
-
-**File**: `agents/interviewer.py`
-
-### 3. Code Evaluator Agent
-
-**Purpose**: Evaluates coding solutions
-
-**Scoring Criteria**:
-- Correctness (40%): Logic solves problem
-- Approach (30%): Problem-solving method
-- Quality (20%): Code organization
-- Completeness (10%): Edge cases handled
-
-**Note**: Focuses on LOGIC, not syntax
-
-**File**: `agents/code_evaluator.py`
-
-### 4. Report Generator Agent
-
-**Purpose**: Creates comprehensive interview reports
-
-**Report Sections**:
-1. Executive Summary
-2. Technical Assessment (/40 points)
-3. Problem-Solving Skills (/30 points)
-4. Communication (/20 points)
-5. Coding Assessment (/10 points)
-6. Detailed Analysis
-7. Recommendations
-
-**File**: `agents/report_generator.py`
-
-## 🎨 Customization
-
-### Modify Prompts
-
-Edit `prompts/agent_prompts.py`:
-
-```python
-INTERVIEWER_AGENT_PROMPT = """
-Your custom interviewer personality and instructions...
-"""
-```
-
-### Add Custom Job Roles
-
-Edit `frontend/index.html`, add to select options:
-
-```html
-<option value="Your Custom Role">Your Custom Role</option>
-```
-
-### Adjust Scoring Weights
-
-Edit `prompts/agent_prompts.py` in Report Generator prompt:
-
-```
-Technical Assessment: 40% (adjust as needed)
-Problem-Solving: 30%
-Communication: 20%
-Coding: 10%
-```
-
-### Change Interview Duration
-
-Edit `config/settings.py`:
-
-```python
-max_duration = 60  # Change from 45 to 60 minutes
-```
+> `server/logs/` and `server/reports/` hold real candidate data — transcripts,
+> résumés and written evaluations. Keep them gitignored.
 
 ## 🐛 Troubleshooting
 
-### Issue: "Failed to initialize session"
+| Symptom | Likely cause |
+|---|---|
+| Avatar joins but never speaks | Tavus cannot reach the backend — stale tunnel URL baked into the PAL. Clear `TAVUS_PAL_ID`. |
+| Avatar asks its *own* questions | `TAVUS_PAL_ID` points at a PAL whose LLM layer is not aimed here. Clear it. |
+| `Invalid replica_uuid` | `TAVUS_FACE_ID` holds a PAL id (`p…`) instead of a face id (`r…`). |
+| Report never arrives | Gmail App Password. The report is still on disk under `server/reports/`. |
+| `Failed to initialize session` | Bad or missing `ANTHROPIC_API_KEY`. |
 
-**Solution**:
-- Check ANTHROPIC_API_KEY is valid
-- Ensure PDF is properly formatted
-- Check backend server is running
-
-### Issue: "Avatar not loading"
-
-**Solution**:
-- Verify TAVUS_API_KEY is set
-- Check TAVUS_REPLICA_ID is correct
-- Ensure replica is fully processed (10-30 min after creation)
-
-### Issue: "Email not sending"
-
-**Solution**:
-- Verify SMTP settings
-- For Gmail, use App Password, not regular password
-- Check SENDER_EMAIL and MANAGER_EMAIL are set
-- Test SMTP connection separately
-
-### Issue: "Code evaluation fails"
-
-**Solution**:
-- Check coding question was asked
-- Verify code is not empty
-- Review logs in `logs/<session_id>/code_evaluation.txt`
-
-### Issue: "CORS errors in browser"
-
-**Solution**:
-- Ensure backend is running on correct port
-- Check API_URL in frontend matches backend URL
-- Serve frontend from HTTP server, not file://
-
-### Check Logs
-
-```bash
-# View session logs
-ls logs/<session_id>/
-
-# View specific log
-cat logs/<session_id>/interview_transcript.txt
-```
-
-### Test API Health
-
-```bash
-curl http://localhost:8000/health
-```
-
-## 📊 Interview Metrics
-
-The system tracks:
-
-- **Response Quality Scores**: 0-100 for each answer
-- **Difficulty Progression**: How difficulty adjusts
-- **Average Response Time**: Time per question
-- **Code Score**: 0-10 for coding questions
-- **Overall Score**: 0-100 composite score
-
-## 🔐 Security Considerations
-
-1. **API Keys**: Never commit `.env` to version control
-2. **HTTPS**: Use HTTPS in production
-3. **CORS**: Configure allowed origins appropriately
-4. **Authentication**: Add user authentication for production
-5. **Rate Limiting**: Implement rate limits on API endpoints
-
-## 📈 Performance Tips
-
-1. **Use Claude Sonnet**: Faster than Opus, sufficient for interviews
-2. **Cache Resume Analysis**: Reuse for multiple interview attempts
-3. **Optimize PDF Size**: Keep resumes under 5MB
-4. **Database**: Add database for production (PostgreSQL recommended)
-5. **Load Balancing**: Use multiple backend instances for scale
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
+Deeper notes, including Windows-specific failures, are in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## 📄 License
 
-This project is provided as-is for educational and commercial use.
+Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Use, modify and
+distribute it, including commercially, provided you keep the licence and
+copyright notices, state your changes, and carry the NOTICE contents into any
+redistribution. Third-party dependencies keep their own licences.
 
-## 🙏 Acknowledgments
-
-- **Anthropic**: Claude AI for natural language processing
-- **Tavus**: AI avatar technology
-- **LiveKit**: Real-time communication infrastructure
-- **FastAPI**: Modern, fast web framework
-- **React**: Frontend UI library
-
-## 📧 Support
-
-For issues and questions:
-- Check [Troubleshooting](#troubleshooting) section
-- Review logs in `logs/` directory
-- Check API documentation at `http://localhost:8000/docs`
-
----
-
-**Built with ❤️ using Claude AI, Tavus, and LiveKit**
+Built with Claude, Tavus, FastAPI and React.

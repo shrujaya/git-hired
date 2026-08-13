@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { wsUrl } from "../config";
+import FlowHeader from "../components/FlowHeader";
 
 const CameraCheck: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -18,6 +20,8 @@ const CameraCheck: React.FC = () => {
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [error, setError] = useState<string>("");
   const [isRetrying, setIsRetrying] = useState<boolean>(false);
+  // The "Before you begin" confirmations, ticked by the candidate.
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   const navigate = useNavigate();
 
@@ -125,7 +129,7 @@ const CameraCheck: React.FC = () => {
   };
 
   const setupWebSocket = () => {
-    const socket = new WebSocket("ws://localhost:8000/ws/video");
+    const socket = new WebSocket(wsUrl("/ws/video"));
 
     socket.onopen = () => {
       console.log("Connected to FastAPI WebSocket");
@@ -219,272 +223,297 @@ const CameraCheck: React.FC = () => {
   const canProceed =
     cameraEnabled && audioEnabled && faceStatus === "in_frame" && isStreaming;
 
+  // The mock's "Before you begin" checklist: four things only the candidate
+  // can confirm, ticked by hand. Device readiness is still checked separately
+  // (canProceed) — the face warning lives on the camera preview itself.
+  const CHECKS = [
+    {
+      id: "quiet",
+      label: "I am in a quiet room alone",
+      detail: "Background voices can be picked up as your answers.",
+    },
+    {
+      id: "id",
+      label: "My photo ID is within reach",
+      detail: "You may be asked to hold it up to the camera.",
+    },
+    {
+      id: "time",
+      label: "I have 45 uninterrupted minutes",
+      detail: "The interview cannot be paused once it starts.",
+    },
+    {
+      id: "net",
+      label: "I am on a stable connection",
+      detail: "Wired or strong Wi-Fi. Close other video calls.",
+    },
+  ];
+  const allChecked = CHECKS.every((c) => checked[c.id]);
+
+  // 18 bars, heights derived from the one live audio level. Deterministic
+  // per-bar scaling keeps it lively without extra state.
+  const bars = Array.from({ length: 18 }, (_, i) => {
+    const wave = 0.55 + 0.45 * Math.sin(i * 1.7);
+    return Math.max(6, Math.min(100, audioLevel * wave * 1.4));
+  });
+
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-blue-50 via-cyan-50 to-blue-100 flex items-center justify-center p-2 md:p-4">
-      {/* Animated background - Blue theme */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -inset-[10px] opacity-50">
-          <div className="absolute top-0 -left-4 w-72 h-72 bg-blue-400/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
-          <div className="absolute top-0 -right-4 w-72 h-72 bg-cyan-400/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
-          <div className="absolute -bottom-8 left-20 w-72 h-72 bg-teal-400/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
-        </div>
-      </div>
+    <div className="min-h-screen sheet text-ink flex flex-col">
+      <FlowHeader step={1} />
 
-      <div className="relative z-10 w-full h-full flex flex-col items-center justify-center max-w-6xl px-4">
-        {/* Header - Compact */}
-        <div className="text-center mb-3">
-          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent mb-1 tracking-tight">
-            Camera & Audio Check
-          </h1>
-          <p className="text-gray-700 text-xs md:text-sm">
-            Please ensure your camera and microphone are working properly
-          </p>
-        </div>
+      <canvas ref={canvasRef} width={640} height={480} className="hidden" />
 
-        {/* Error Banner */}
-        {error && (
-          <div className="w-full max-w-4xl mb-3 bg-red-500/20 backdrop-blur-sm border border-red-400/50 rounded-xl p-3 animate-shake">
-            <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 text-red-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <div className="flex-1">
-                <p className="text-red-800 font-medium text-sm">{error}</p>
-              </div>
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-8 lg:gap-14 max-w-[1240px] w-full mx-auto px-5 md:px-10 py-8 md:py-12">
+
+        {/* ---- Left: heading + preview + meters ---- */}
+        <div className="flex flex-col gap-6 min-w-0">
+          <div className="reveal" style={{ "--d": "0s" } as React.CSSProperties}>
+            <div className="flex items-center gap-2.5 mb-4">
+              <span className="w-2 h-2 bg-signal" />
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-inksub">
+                Fig. 1 — Equipment check
+              </span>
+            </div>
+            <h1 className="font-display font-extrabold text-[38px] md:text-[46px] leading-[1.02] tracking-hero">
+              Check your camera<br />and microphone
+            </h1>
+            <span className="redline w-24 mt-5" />
+            <p className="text-[15px] leading-relaxed text-inksub max-w-[52ch] mt-4">
+              Your interviewer needs to see and hear you clearly. Nothing on
+              this page is recorded.
+            </p>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-3 px-4 py-3 border-2 border-alarm bg-card animate-shake">
+              <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-alarm flex-shrink-0">
+                Err
+              </span>
+              <p className="flex-1 text-[13.5px] text-ink">{error}</p>
               <button
                 onClick={handleRetry}
                 disabled={isRetrying}
-                className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-red-500/50 text-white rounded-lg text-xs font-medium transition-colors"
+                className="flex-shrink-0 px-3.5 py-1.5 bg-[#C43B30] hover:bg-[#D24A3F] disabled:opacity-60 text-white text-[13px] font-semibold transition-colors"
               >
-                {isRetrying ? "Retrying..." : "Retry"}
+                {isRetrying ? "Retrying…" : "Retry"}
               </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Main Content */}
-        <div className="flex-1 w-full flex flex-col items-center justify-center">
-          {/* Video Container - Larger */}
-          <div className="relative w-full max-w-4xl h-[55vh] mb-4 rounded-2xl overflow-hidden shadow-2xl ring-2 ring-blue-500/50">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover bg-black"
-            />
+          {/* Camera preview — drawn as a figure with corner ticks */}
+          <div
+            className="reveal relative"
+            style={{ "--d": "0.08s" } as React.CSSProperties}
+          >
+            <div className="relative aspect-[16/10] overflow-hidden border-2 border-ink bg-field">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover"
+              />
 
-            {/* Video Overlay Effects */}
-            <div className="absolute inset-0 pointer-events-none">
-              {/* Corner guides - Blue theme */}
-              <div className="absolute top-4 left-4 w-12 h-12 border-l-4 border-t-4 border-blue-400 rounded-tl-lg"></div>
-              <div className="absolute top-4 right-4 w-12 h-12 border-r-4 border-t-4 border-blue-400 rounded-tr-lg"></div>
-              <div className="absolute bottom-4 left-4 w-12 h-12 border-l-4 border-b-4 border-blue-400 rounded-bl-lg"></div>
-              <div className="absolute bottom-4 right-4 w-12 h-12 border-r-4 border-b-4 border-blue-400 rounded-br-lg"></div>
-            </div>
-
-            {/* Status Badge */}
-            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20">
-              {!isStreaming && !error && (
-                <div className="bg-blue-500/90 backdrop-blur-sm text-white px-5 py-2 rounded-full text-sm font-semibold shadow-lg flex items-center gap-2">
-                  <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                  Connecting...
+              {!stream && !error && (
+                <div className="absolute inset-0 blueprint flex flex-col items-center justify-center gap-3">
+                  <div className="w-14 h-14 rounded-full border border-dashed border-trace/60" />
+                  <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-dsub">
+                    waiting for camera…
+                  </div>
                 </div>
               )}
 
+              {/* Status pill */}
+              <div className="absolute top-3.5 left-3.5 flex items-center gap-2 px-2.5 py-1.5 bg-field/85 backdrop-blur-sm border border-edge">
+                <span
+                  className={
+                    "w-1.5 h-1.5 " +
+                    (isStreaming ? "bg-trace" : "bg-signal-dark animate-recblink")
+                  }
+                />
+                <span className="font-mono text-[9.5px] tracking-[0.12em] uppercase text-dtext">
+                  {isStreaming ? "Live check" : "Connecting…"}
+                </span>
+              </div>
+
+              {/* Face-position warning, on the preview itself */}
               {faceStatus === "out_of_frame" && isStreaming && (
-                <div className="bg-yellow-500/90 backdrop-blur-sm text-white px-5 py-2 rounded-full text-sm font-semibold shadow-lg animate-bounce flex items-center gap-2">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  Please place yourself in the center of the camera
+                <div className="absolute inset-0 bg-field/60 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                  <div className="w-16 h-16 rounded-full border-2 border-dashed border-alarm" />
+                  <div className="px-4 py-2 bg-field/90 backdrop-blur-sm border border-alarm text-center">
+                    <p className="text-[14px] font-semibold text-alarm">
+                      Face not centered
+                    </p>
+                    <p className="text-[11.5px] text-dsub mt-0.5">
+                      Move so your face sits in the middle of the frame
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-
-          <canvas ref={canvasRef} width={640} height={480} className="hidden" />
-
-          {/* Status Indicators - Compact */}
-          <div className="w-full max-w-4xl bg-white/80 backdrop-blur-md rounded-xl p-4 mb-3 border border-blue-100 shadow-xl">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {/* Camera Status */}
-              <div className="flex items-center gap-3 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 border border-blue-100">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${
-                  cameraEnabled ? "bg-gradient-to-br from-green-400 to-emerald-500" : "bg-gradient-to-br from-red-400 to-red-500"
-                }`}>
-                  {cameraEnabled ? (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-sm">Camera</p>
-                  <p
-                    className={`text-xs font-medium ${
-                      cameraEnabled ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {cameraEnabled ? "Enabled" : "Disabled"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Audio Status */}
-              <div className="flex items-center gap-3 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 border border-blue-100">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${
-                  audioEnabled ? "bg-gradient-to-br from-green-400 to-emerald-500" : "bg-gradient-to-br from-red-400 to-red-500"
-                }`}>
-                  {audioEnabled ? (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-sm">
-                    Microphone
-                  </p>
-                  <p
-                    className={`text-xs font-medium ${
-                      audioEnabled ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {audioEnabled ? "Enabled" : "Disabled"}
-                  </p>
-                  {/* Audio Level Bar - Blue theme */}
-                  {audioEnabled && (
-                    <div className="mt-1.5 h-1 bg-blue-100 rounded-full overflow-hidden border border-blue-200">
-                      <div 
-                        className="h-full bg-gradient-to-r from-blue-400 to-cyan-500 transition-all duration-100"
-                        style={{ width: `${audioLevel}%` }}
-                      ></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Connection Status */}
-              <div className="flex items-center gap-3 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 border border-blue-100">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${
-                  isStreaming ? "bg-gradient-to-br from-green-400 to-emerald-500" : "bg-gradient-to-br from-yellow-400 to-yellow-500"
-                }`}>
-                  {isStreaming ? (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-sm">
-                    Connection
-                  </p>
-                  <p
-                    className={`text-xs font-medium ${
-                      isStreaming ? "text-green-600" : "text-yellow-600"
-                    }`}
-                  >
-                    {isStreaming ? "Connected" : "Connecting..."}
-                  </p>
-                </div>
-              </div>
+            {/* Corner ticks */}
+            <span className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-signal" />
+            <span className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-signal" />
+            <div className="flex justify-between mt-2 font-mono text-[8.5px] tracking-[0.14em] uppercase text-inkfaint">
+              <span>Camera preview · 16:10</span>
+              <span>not recorded</span>
             </div>
           </div>
 
-          {/* Proceed Button - Compact */}
+          {/* Meters — ruled cells */}
+          <div
+            className="reveal grid grid-cols-1 sm:grid-cols-2 border-2 border-ink divide-y sm:divide-y-0 sm:divide-x divide-rule bg-card"
+            style={{ "--d": "0.16s" } as React.CSSProperties}
+          >
+            <div className="px-[18px] py-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[13px] font-semibold">
+                  Microphone
+                </div>
+                <div
+                  className={
+                    "font-mono text-[9.5px] tracking-[0.1em] uppercase " +
+                    (audioEnabled ? "text-inksub" : "text-alarm")
+                  }
+                >
+                  {audioEnabled ? "detected" : "off"}
+                </div>
+              </div>
+              <div className="flex items-end gap-[3px] h-7">
+                {bars.map((h, i) => (
+                  <div
+                    key={i}
+                    className="flex-1 bg-trace transition-[height] duration-100"
+                    style={{ height: `${audioEnabled ? h : 4}%` }}
+                  />
+                ))}
+              </div>
+              <div className="text-xs text-inksub mt-2.5">
+                {audioEnabled
+                  ? "Say a few words — you should see movement"
+                  : "Allow microphone access to continue"}
+              </div>
+            </div>
+
+            <div className="px-[18px] py-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[13px] font-semibold">
+                  Connection
+                </div>
+                <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inksub">
+                  {isStreaming ? "open" : "…"}
+                </div>
+              </div>
+              <div className="flex items-end gap-[3px] h-7">
+                {[40, 62, 88, 100].map((h, i) => (
+                  <div
+                    key={i}
+                    className={"flex-1 " + (isStreaming ? "bg-trace" : "bg-rule")}
+                    style={{ height: `${h}%` }}
+                  />
+                ))}
+                <div className="flex-1 bg-rule" style={{ height: "100%" }} />
+              </div>
+              <div className="text-xs text-inksub mt-2.5">
+                {isStreaming
+                  ? "Connected — face tracking is running"
+                  : "Reaching the interview server…"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ---- Right: readiness + expectations + continue ---- */}
+        <div className="flex flex-col gap-5 min-w-0">
+          <div
+            className="reveal border-2 border-ink bg-card"
+            style={{ "--d": "0.12s" } as React.CSSProperties}
+          >
+            <div className="px-[22px] pt-5 pb-4 border-b-2 border-ink">
+              <div className="font-display font-bold text-[19px] tracking-sub">
+                Before you begin
+              </div>
+              <div className="text-[13px] text-inksub mt-0.5">
+                Confirm all four to continue.
+              </div>
+            </div>
+            <div className="flex flex-col divide-y divide-rule">
+              {CHECKS.map((c, i) => (
+                <div
+                  key={c.id}
+                  onClick={() =>
+                    setChecked((prev) => ({ ...prev, [c.id]: !prev[c.id] }))
+                  }
+                  role="checkbox"
+                  aria-checked={!!checked[c.id]}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === " " || e.key === "Enter") {
+                      e.preventDefault();
+                      setChecked((prev) => ({ ...prev, [c.id]: !prev[c.id] }));
+                    }
+                  }}
+                  className="flex gap-[13px] px-[22px] py-[15px] cursor-pointer hover:bg-paper transition-colors"
+                >
+                  <span className="font-mono text-[9px] text-inkfaint mt-1 flex-shrink-0">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <div
+                    className={
+                      "flex-shrink-0 w-[18px] h-[18px] mt-0.5 flex items-center justify-center border-2 transition-colors " +
+                      (checked[c.id]
+                        ? "border-signal bg-signal"
+                        : "border-inkfaint bg-card")
+                    }
+                  >
+                    {checked[c.id] && (
+                      <div className="w-[9px] h-[5px] border-l-2 border-b-2 border-black -rotate-45 -translate-y-[1px]" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-medium leading-snug">{c.label}</div>
+                    <div className="text-[12.5px] text-inksub leading-relaxed mt-0.5">
+                      {c.detail}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="reveal px-5 py-[18px] bg-wash border border-washline"
+            style={{ "--d": "0.2s" } as React.CSSProperties}
+          >
+            <div className="font-mono text-[9px] tracking-[0.14em] uppercase text-inksub mb-2">
+              Note — what to expect
+            </div>
+            <div className="text-[13.5px] leading-relaxed text-ink">
+              An AI interviewer asks technical questions tailored to your resume,
+              including a live coding exercise. Your transcript and code are
+              shared with the hiring team afterwards.
+            </div>
+          </div>
+
           <button
             onClick={handleProceed}
-            disabled={!canProceed}
-            className={`group w-full max-w-lg py-3 rounded-xl text-base font-bold transition-all duration-300 transform ${
-              canProceed
-                ? "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white shadow-lg shadow-blue-500/50 hover:scale-105 hover:shadow-xl"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed"
-            }`}
+            disabled={!canProceed || !allChecked}
+            className={
+              "reveal w-full py-4 text-[14.5px] font-semibold tracking-[-0.005em] transition-colors " +
+              (canProceed && allChecked
+                ? "bg-signal hover:bg-signal-dark text-black cursor-pointer border-2 border-signal"
+                : "bg-transparent text-inkfaint border-2 border-rule cursor-not-allowed")
+            }
+            style={{ "--d": "0.26s" } as React.CSSProperties}
           >
-            {canProceed ? (
-              <span className="flex items-center justify-center gap-2">
-                Proceed to Landing Page
-                <svg
-                  className={`w-5 h-5 ${
-                    canProceed ? "group-hover:translate-x-1" : ""
-                  } transition-transform`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 7l5 5m0 0l-5 5m5-5H6"
-                  />
-                </svg>
-              </span>
-            ) : (
-              "Waiting for setup..."
-            )}
+            {!allChecked
+              ? "Confirm the checklist to continue"
+              : !canProceed
+              ? "Waiting for your setup…"
+              : "Continue to role selection →"}
           </button>
-
-          {!canProceed && cameraEnabled && audioEnabled && (
-            <p className="text-gray-700 text-xs mt-2 text-center">
-              Position your face in the center of the camera frame to continue
-            </p>
-          )}
         </div>
       </div>
-
-      <style>{`
-        @keyframes blob {
-          0% {
-            transform: translate(0px, 0px) scale(1);
-          }
-          33% {
-            transform: translate(30px, -50px) scale(1.1);
-          }
-          66% {
-            transform: translate(-20px, 20px) scale(0.9);
-          }
-          100% {
-            transform: translate(0px, 0px) scale(1);
-          }
-        }
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-        @keyframes shake {
-          0%, 100% {
-            transform: translateX(0);
-          }
-          10%, 30%, 50%, 70%, 90% {
-            transform: translateX(-5px);
-          }
-          20%, 40%, 60%, 80% {
-            transform: translateX(5px);
-          }
-        }
-        .animate-shake {
-          animation: shake 0.5s;
-        }
-      `}</style>
     </div>
   );
 };
