@@ -87,6 +87,16 @@ class APIConfig(BaseModel):
     tavus_llm_api_key: str = Field(
         default_factory=lambda: os.getenv("TAVUS_LLM_API_KEY", "")
     )
+    # Optional file remembering the last PAL we created and the base URL it was
+    # created for. A PAL bakes in its LLM base_url, so it is only reusable while
+    # that URL still resolves - which is why the cache is keyed by URL rather
+    # than just storing an id. Unset (the default) disables caching entirely;
+    # docker-compose points it at a named volume so a restart behind an
+    # unchanged tunnel reuses the PAL instead of leaving a new one on the
+    # account every time.
+    tavus_pal_cache: str = Field(
+        default_factory=lambda: os.getenv("TAVUS_PAL_CACHE", "")
+    )
     livekit_url: str = Field(default_factory=lambda: os.getenv("LIVEKIT_URL", "wss://test-w50p3304.livekit.cloud"))
     livekit_api_key: str = Field(default_factory=lambda: os.getenv("LIVEKIT_API_KEY", ""))
     livekit_api_secret: str = Field(default_factory=lambda: os.getenv("LIVEKIT_API_SECRET", ""))

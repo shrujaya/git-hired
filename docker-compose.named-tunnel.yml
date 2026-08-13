@@ -1,0 +1,49 @@
+# Optional override: a named Cloudflare tunnel instead of a quick tunnel.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.named-tunnel.yml up
+#
+# Why bother: a quick tunnel gets a new *.trycloudflare.com hostname on every
+# boot, which forces a new Tavus PAL each time. A named tunnel keeps one
+# hostname forever, so the PAL is created once and reused - and you can pin
+# TAVUS_PAL_ID in server/.env again.
+#
+# Setup, once:
+#   1. Cloudflare Zero Trust dashboard -> Networks -> Tunnels -> Create tunnel
+#   2. Route it to  http://backend:8100
+#   3. Put both values in a .env file at the REPO ROOT (not server/.env):
+#        TUNNEL_TOKEN=eyJhIjoi...
+#        TUNNEL_HOSTNAME=interviews.example.com
+#
+# Root .env, specifically: compose reads that file for ${...} substitution
+# below. server/.env is handed to containers at run time and is never consulted
+# for substitution, so values placed there would silently resolve to empty.
+#
+# Requires a Cloudflare account and a domain on it; the quick tunnel in the
+# base file requires neither.
+
+services:
+  tunnel:
+    # `run` replaces the quick tunnel's `--url`: routing now comes from the
+    # tunnel's own configuration in the Cloudflare dashboard.
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 0.0.0.0:2000
+      - run
+    environment:
+      # cloudflared reads this itself, so the token stays out of the process
+      # arguments that `docker ps` and `docker compose config` print.
+      #
+      # Passed explicitly rather than via env_file: server/.env holds your
+      # Anthropic and Tavus keys, which have no business inside a third-party
+      # image, and cloudflared maps stray TUNNEL_* variables onto its own CLI
+      # flags.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in a .env file at the repo root}
+
+  backend:
+    environment:
+      # Set, so the entrypoint skips quick-tunnel discovery and trusts this
+      # hostname directly - and treats the URL as stable, which means a pinned
+      # TAVUS_PAL_ID is honoured rather than cleared.
+      TUNNEL_HOSTNAME: ${TUNNEL_HOSTNAME:?set TUNNEL_HOSTNAME in a .env file at the repo root}

@@ -154,6 +154,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def read_cached_pal(base_url: str) -> Optional[str]:
+    """Return a previously created PAL id, if it was made for this same URL.
+
+    A Tavus PAL stores the LLM base_url it was created with, so one made for a
+    dead tunnel is worse than useless: the conversation starts, the avatar
+    listens, and nothing is ever spoken because Tavus cannot reach us. Hence
+    the URL check rather than a bare id lookup.
+    """
+    cache_path = config.api.tavus_pal_cache
+    if not cache_path or not base_url:
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        # No cache yet, or a truncated one. Provisioning a new PAL is the
+        # correct fallback - never a reason to fail startup.
+        return None
+    if data.get("base_url") != base_url:
+        return None
+    pal_id = data.get("pal_id")
+    return pal_id if isinstance(pal_id, str) and pal_id else None
+
+
+def write_cached_pal(base_url: str, pal_id: str) -> None:
+    """Record a freshly created PAL against the URL it was created for."""
+    cache_path = config.api.tavus_pal_cache
+    if not cache_path or not base_url or not pal_id:
+        return
+    try:
+        path = Path(cache_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"base_url": base_url, "pal_id": pal_id}, f)
+    except OSError as e:
+        # Caching is an optimisation; a read-only volume must not take the
+        # interview down with it.
+        print(f"Could not write PAL cache to {cache_path}: {e}")
+
+
 # Global state management
 class SessionManager:
     def __init__(self):
@@ -187,6 +227,15 @@ class SessionManager:
             return self.tavus_pal_id
         if not self.tavus_client:
             return None
+
+        # A PAL created for this exact URL in an earlier run is still valid;
+        # creating another would just leave the old one on the account.
+        cached = read_cached_pal(config.api.tavus_llm_base_url)
+        if cached:
+            self.tavus_pal_id = cached
+            print(f"Reusing Tavus PAL {cached} for {config.api.tavus_llm_base_url}")
+            return cached
+
         if not config.api.tavus_llm_base_url:
             print(
                 "Cannot create Tavus PAL: TAVUS_LLM_BASE_URL is unset, so Tavus "
@@ -239,6 +288,8 @@ class SessionManager:
                     f"Created Tavus PAL {self.tavus_pal_id} - "
                     f"set TAVUS_PAL_ID={self.tavus_pal_id} in server/.env to reuse it"
                 )
+                if self.tavus_pal_id:
+                    write_cached_pal(config.api.tavus_llm_base_url, self.tavus_pal_id)
                 return self.tavus_pal_id
         except Exception as e:
             print(f"Error creating Tavus PAL: {e}")

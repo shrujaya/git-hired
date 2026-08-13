@@ -1,0 +1,33 @@
+# Keep the build context small and free of host-specific artefacts.
+# Anything here is invisible to COPY inside the Dockerfiles.
+
+# Host-built dependency trees. These are compiled for the host's OS/arch
+# (macOS arm64 here) and would be wrong inside a linux container.
+.venv/
+**/node_modules/
+**/__pycache__/
+*.pyc
+
+# Secrets. server/.env reaches the container through compose's env_file,
+# which reads it from the host at run time - it must never be baked into
+# an image layer.
+**/.env
+**/.env.local
+
+# Runtime output. Bind-mounted back in by compose, so copying it would only
+# be shadowed anyway.
+server/logs/
+server/reports/
+logs/
+reports/
+*.jsonl
+
+# Build output, rebuilt inside the image.
+agentic-interviewer/dist/
+
+# Repo furniture with no bearing on the build.
+.git/
+.gitignore
+.DS_Store
+**/.DS_Store
+*.md

@@ -17,10 +17,11 @@ The work landed in three batches:
 | **7** | "Drafting office" visual identity replaces the Vantage look (§18) | Committed in `9e7956c`…`1c6deb7` |
 | **8** | Dark end to end: ink / acid-lime / electric-cyan (§19) | Committed in `9e7956c`…`1c6deb7` |
 | **9** | Exact colour + motion values taken from the second mock (§20), email diagnosis (§21) | Committed as [`1c6deb7`](https://github.com/shrujaya/git-hired/commit/1c6deb7) |
-| **10** | PDF reports, a cover sheet before the flow, fullscreen that works, bring-your-own job description, one logs root (§22–§26) | Uncommitted working tree |
-| **11** | Proctoring signals reach the report (§27) | Uncommitted working tree |
+| **10** | PDF reports, a cover sheet before the flow, fullscreen that works, bring-your-own job description, one logs root (§22–§26) | Committed as [`a83ef39`](https://github.com/shrujaya/git-hired/commit/a83ef39) |
+| **11** | Proctoring signals reach the report (§27) | Committed as [`84e2671`](https://github.com/shrujaya/git-hired/commit/84e2671) |
+| **12** | Apache-2.0 (§28), `docker compose` with automatic tunnel-URL injection (§29), README cut from 1,089 to 233 lines (§30) | Uncommitted working tree |
 
-`git diff 2f346e3` reproduces all eleven batches together.
+`git diff 2f346e3` reproduces all twelve batches together.
 
 > **Correction.** §10 previously described a per-turn transcript autosave as
 > part of batch 3. It was not in `cbc3096` — the section described work that
@@ -31,8 +32,8 @@ The work landed in three batches:
 
 ## TL;DR for the next person
 
-Twelve things happened. The first eight were each triggered by the previous one
-failing; the rest are deliberate work:
+Thirteen things happened. The first eight were each triggered by the previous
+one failing; the rest are deliberate work:
 
 1. **The repo did not run on Windows.** Fixed the setup/run scripts, the venv
    layout assumption, a console crash, and CWD-dependent config.
@@ -79,10 +80,16 @@ failing; the rest are deliberate work:
     report: the face events had no session id, the tab counts never left the
     browser, and the keystroke logger watched the server's own keyboard. All
     three now land in one per-session log and a report section (§27).
+13. **Starting work meant pasting a tunnel URL into `.env`, every time.** The
+    tunnel is now a `docker compose` service and its URL is discovered at boot
+    and injected before the server starts, so the whole system comes up with
+    one command (§29). The repo also gained a licence (§28), and the README
+    went from 1,089 lines to 233 (§30).
 
 **If you only read one thing:** the backend needs a **public URL**
-(`TAVUS_LLM_BASE_URL`) for the avatar to work at all. Locally that means running
-a tunnel. See [Live conversation setup](README.md#live-conversation-setup).
+(`TAVUS_LLM_BASE_URL`) for the avatar to work at all. `docker compose up`
+handles this for you (§29); running natively means starting a tunnel and
+pasting its URL in yourself.
 
 **If you only fix one thing:** Known issue 14 — the interview can say goodbye
 up to three times, because `questions_remaining` hits 0 one turn before
@@ -1169,7 +1176,7 @@ setup on Windows. `./setup.sh` / `.\setup.ps1` install it from
 
 ## 22. The report leaves as a PDF
 
-*(Batch 10 — uncommitted)*
+*(Batch 10 — committed as `a83ef39`)*
 
 The hiring manager was emailed the raw Markdown file, which most mail clients
 show as plain text with the `##` and `**` still in it.
@@ -1203,7 +1210,7 @@ on disk by then, and an ugly attachment beats none.
 
 ## 23. A cover sheet before the flow, and a way back to it
 
-*(Batch 10 — uncommitted)*
+*(Batch 10 — committed as `a83ef39`)*
 
 The app opened straight onto the device check, with no page explaining what the
 interview was. [`WelcomePage.tsx`](agentic-interviewer/src/pages/WelcomePage.tsx)
@@ -1237,7 +1244,7 @@ right back.
 
 ## 24. The interview actually opens fullscreen
 
-*(Batch 10 — uncommitted)*
+*(Batch 10 — committed as `a83ef39`)*
 
 The interview page had `setTimeout(() => enterFullscreen(), 500)` on mount. That
 could never have worked: `requestFullscreen()` requires **transient user
@@ -1267,7 +1274,7 @@ and never stacks with the exit warning.
 
 ## 25. Bring your own job description
 
-*(Batch 10 — uncommitted)*
+*(Batch 10 — committed as `a83ef39`)*
 
 A sixth option on the role page — **06, "Something else"** — for candidates
 interviewing for a role that is not one of the five listed. Same card
@@ -1311,7 +1318,7 @@ empty a line appears directly under the input saying so.
 
 ## 26. One place for runtime output
 
-*(Batch 10 — uncommitted)*
+*(Batch 10 — committed as `a83ef39`)*
 
 There were **four** log directories, three of them accidental:
 
@@ -1357,7 +1364,7 @@ known issue 1.
 
 ## 27. Proctoring signals reach the report
 
-*(Batch 11 — uncommitted)*
+*(Batch 11 — committed as `84e2671`)*
 
 Three kinds of integrity evidence were being produced and **none of it reached
 the report**, each for a different reason:
@@ -1427,6 +1434,157 @@ confirming the section renders with the intended tone.
 
 ---
 
+## 28. Apache-2.0
+
+*(Batch 12 — uncommitted)*
+
+The repository had no licence file; the README said only "provided as-is for
+educational and commercial use", which grants nothing in particular and leaves
+anyone wanting to use the code without a basis for doing so.
+
+- [`LICENSE`](LICENSE) — the Apache License 2.0, verbatim. Taken from a
+  packaged copy on disk and cross-checked against a second independent copy
+  rather than typed from memory: all nine sections, the appendix intact, no
+  vendor text.
+- [`NOTICE`](NOTICE) — attribution, and two clarifications worth having in
+  writing: third-party dependencies keep their own licences, and interview
+  transcripts and reports are runtime *output*, not part of the licensed work.
+- README licence section rewritten; `license: "Apache-2.0"` added to
+  `agentic-interviewer/package.json`.
+
+**The copyright line reads `Copyright 2026 The Git-Hired Contributors`.** The
+repository has six distinct contributors across two universities, so no single
+holder was assumed — change it in `NOTICE` and the README if the project should
+be attributed to a person or an institution.
+
+Per-file licence headers were **not** added. Apache recommends them but does
+not require them; they would touch every source file and are better as their
+own commit.
+
+---
+
+## 29. `docker compose up`, and the end of pasting tunnel URLs
+
+*(Batch 12 — uncommitted)*
+
+Three services — `frontend`, `backend`, `tunnel` — on one network, started with
+one command. The point is not packaging; it is deleting a manual step that had
+to be repeated at the start of every working session.
+
+### The step that is now gone
+
+Tavus calls *into* this backend for every interviewer line, so the backend needs
+a public URL, and a cloudflared quick tunnel invents a new hostname on every
+boot. Until now that meant: start the tunnel, read the boxed URL, paste it into
+`server/.env` as `TAVUS_LLM_BASE_URL`, restart the backend. Every time.
+
+[`docker/backend-entrypoint.sh`](docker/backend-entrypoint.sh) does it instead.
+cloudflared runs a metrics server; `GET /quicktunnel` returns
+`{"hostname":"…trycloudflare.com"}` once the tunnel has registered. The
+entrypoint polls it, exports `TAVUS_LLM_BASE_URL`, and only then `exec`s
+uvicorn.
+
+**Ordering is the whole trick.** `config/settings.py` snapshots the environment
+at *import* time, so the value has to exist before Python starts — not after.
+An `os.environ` write from inside the app would be too late.
+
+The export **overrides** whatever `server/.env` holds, so a stale URL from last
+session cannot win. Verified live: with `.env` still containing a dead
+`biology-periodically-communist-schedules…` host, the running server had the
+freshly discovered one, and a `POST /v1/chat/completions` through the public URL
+returned `401` — the loop closes and the endpoint is still guarded.
+
+### Three traps handled
+
+**A pinned PAL is poison under a quick tunnel.** A PAL bakes in its
+`base_url` (§5's operational trap), so one created for a previous tunnel points
+at a dead host — and the failure is silent: the avatar joins, listens, and never
+speaks. The entrypoint clears `TAVUS_PAL_ID` when the tunnel is ephemeral.
+
+To avoid then creating a new PAL on every restart, `TAVUS_PAL_CACHE` (new,
+optional, off by default) records `{base_url, pal_id}` and reuses it **only when
+the URL matches**. Keyed by URL, so it self-invalidates rather than resurrecting
+a dead PAL. Unset — every non-Docker run — the code paths are inert.
+
+**`pynput` broke the image build.** It compiles `evdev` from source on Linux,
+which needs kernel headers. Rather than carrying them, it is the one dependency
+omitted from the image: the module that imports it is deliberately not wired
+into the backend anyway, because it watches the keyboard of the machine it runs
+on — in a container, the server rather than the candidate (see the docstring in
+[`proctoring.py`](server/agents/proctoring.py), and §27).
+
+**`env_file:` does not feed compose's `${…}` interpolation.** The first
+named-tunnel override read `TUNNEL_TOKEN` from `server/.env` and would have
+resolved it to empty *and* piped the Anthropic and Tavus keys into a
+third-party image, where cloudflared maps stray `TUNNEL_*` variables onto its
+own CLI flags. The token is now passed explicitly, from a root `.env`.
+
+### Other decisions
+
+- **The backend image is `linux/amd64`**, even on Apple Silicon: mediapipe
+  0.10.21 publishes no `linux/arm64` wheel (checked against PyPI — macOS,
+  Windows and `manylinux_2_28_x86_64` only) and building it is a multi-hour
+  Bazel job. It runs under Rosetta. Face tracking is 2 frames/second, so
+  emulation costs nothing that matters. The frontend image is native.
+- **The mediapipe/protobuf check from `setup.sh` runs at build time**, so a bad
+  pin fails the build rather than the first interview.
+- `TAVUS_LLM_API_KEY` is generated into a Docker volume when unset — the
+  internet-facing endpoint is never left unauthenticated. Stable across
+  restarts, because it is baked into every PAL created with it.
+- Source is bind-mounted, so uvicorn's reloader and Vite HMR both work and
+  reports land on the host instead of dying with the container. Vite needed
+  `server.host` and opt-in `watch.usePolling` (`VITE_USE_POLLING`) — bind mounts
+  on Docker Desktop do not deliver inotify events.
+- `ENABLE_AVATAR=false` skips tunnel discovery entirely instead of waiting 90s.
+
+Verified end to end: tunnel discovery, public routing, the `401`, PAL-cache
+hit/miss/corrupt-file behaviour, stale-PAL clearing, secret generation and
+reuse, both hot-reload paths, and a full restart picking up a new hostname
+unattended.
+
+For a hostname that survives restarts,
+[`docker-compose.named-tunnel.yml`](docker-compose.named-tunnel.yml) overrides
+the quick tunnel with a named one — then `TAVUS_PAL_ID` can be pinned again.
+
+---
+
+## 30. The README was 1,089 lines
+
+*(Batch 12 — uncommitted)*
+
+Long enough that the answer to "what is this and how do I start it" was buried
+under Windows PowerShell execution policies. Now **233 lines**: what Git-Hired
+does, the features, a mermaid architecture diagram, start/stop commands,
+configuration, an endpoint table, layout, and a five-row troubleshooting table.
+
+The diagram was **rendered before committing**, not eyeballed — a broken mermaid
+block shows up as an error box on GitHub. It makes the `Tavus → backend` arrow
+explicit, since that inversion is the one thing about this system nobody guesses
+correctly.
+
+Native setup and named-tunnel instructions moved into `<details>` blocks: still
+present, out of the way.
+
+**The Tavus and Windows debugging notes were moved, not deleted** — they were
+expensive to work out — to
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md), now also covering the
+Docker-specific traps. One stale claim was corrected on the way: it said a PAL
+must be `pipeline_mode: echo`, but the code creates `full`.
+
+Cut outright: the table of contents (GitHub generates an outline), Interview
+Metrics, Security Considerations, Performance Tips, Contributing,
+Acknowledgments, Support, the Customization section, and the full Apache
+boilerplate block.
+
+**One cut is worth knowing about.** The per-agent breakdown is gone, including
+the adaptive-difficulty deltas (+2 for 90–100 down to −2 for 0–29) and the
+report's section weights (Technical /40, Problem-Solving /30, Communication /20,
+Coding /10). Unlike the rest, that is not recoverable from elsewhere in the
+repo — it is in this file's history and in `settings.py` / the prompts. Restore
+it if the numbers turn out to be load-bearing for anyone.
+
+---
+
 ## Files
 
 **Added**
@@ -1444,6 +1602,14 @@ confirming the section renders with the intended tone.
 | [`agentic-interviewer/src/pages/WelcomePage.tsx`](agentic-interviewer/src/pages/WelcomePage.tsx) | Cover sheet at `/` (batch 10) |
 | [`agentic-interviewer/src/components/BrandMark.tsx`](agentic-interviewer/src/components/BrandMark.tsx) | The `>_` mark, optionally a link home (batch 10) |
 | [`server/agents/proctoring.py`](server/agents/proctoring.py) | Per-session integrity log + its report wording (batch 11) |
+| [`LICENSE`](LICENSE) · [`NOTICE`](NOTICE) | Apache-2.0 + attribution (batch 12) |
+| [`docker-compose.yml`](docker-compose.yml) | frontend + backend + tunnel (batch 12) |
+| [`docker-compose.named-tunnel.yml`](docker-compose.named-tunnel.yml) | Override for a stable hostname (batch 12) |
+| [`docker/backend.Dockerfile`](docker/backend.Dockerfile) | FastAPI + mediapipe, `linux/amd64` (batch 12) |
+| [`docker/frontend.Dockerfile`](docker/frontend.Dockerfile) | Vite dev server (batch 12) |
+| [`docker/backend-entrypoint.sh`](docker/backend-entrypoint.sh) | Resolves the tunnel URL, then starts the server (batch 12) |
+| [`.dockerignore`](.dockerignore) | Keeps host venv/node_modules and secrets out of the build context (batch 12) |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Tavus, Docker and Windows failure modes, moved out of the README (batch 12) |
 
 **Modified (batch 1)** — `server/backend/server.py`, `server/config/settings.py`,
 `server/agents/report_generator.py` (missing `encoding='utf-8'` on a transcript
@@ -1528,6 +1694,14 @@ summary through `generate_report`), `server/prompts/agent_prompts.py`
 `agentic-interviewer/src/pages/InterviewPage.tsx` (`reportEvent`, batched
 keystrokes, paste/copy handlers on the editor, session id on the video
 socket).
+
+**Modified (batch 12)** — `server/backend/server.py` (`read_cached_pal` /
+`write_cached_pal`, consulted in `ensure_tavus_pal`),
+`server/config/settings.py` (`tavus_pal_cache`), `server/.env.example` (note
+that `TAVUS_LLM_BASE_URL` is auto-injected under Docker),
+`agentic-interviewer/vite.config.ts` (`server.host`, opt-in
+`watch.usePolling`), `agentic-interviewer/package.json` (`license`),
+`README.md` (1,089 → 233 lines).
 
 ---
 
@@ -1709,6 +1883,31 @@ Playwright against the dev server with the backend stubbed.
   API.
 - `tsc --noEmit` clean; production build passes; backend imports.
 
+**Batch 12:** verified by running the stack, not by reading the config.
+
+- **Tunnel injection**: with `server/.env` still holding a dead
+  `biology-periodically-communist-schedules…` host, `/proc/1/environ` in the
+  running container showed the freshly discovered URL — the override wins.
+  Confirmed twice, on a second boot that picked up a new hostname unattended.
+- **The public loop closes**: the discovered URL routes to the backend from the
+  internet, and `POST /v1/chat/completions` returns `401` unauthenticated.
+- **6** PAL cache: empty cache, matching URL, **non-matching URL**, blank URL,
+  truncated JSON, and caching disabled — only the matching URL returns an id,
+  and no case raises.
+- **Entrypoint paths**: a pinned `TAVUS_PAL_ID` is cleared under a quick tunnel;
+  `ENABLE_AVATAR=false` skips discovery in 0.65s instead of waiting; a generated
+  `TAVUS_LLM_API_KEY` is 43 chars, mode `600`, and identical across two runs.
+- **Both hot-reload paths** through the bind mounts: Vite reported an HMR update
+  and uvicorn's `WatchFiles` reported a reload.
+- **The mermaid diagram renders** — checked by rendering it to SVG and PNG and
+  looking at the result, not by reading the source.
+- Native (non-Docker) backend still imports with the PAL cache inert;
+  `tsc --noEmit` clean.
+
+  One thing this does *not* cover: no interview has been run end-to-end through
+  the containers against a live Tavus conversation, because that spends avatar
+  credits. The PAL-creation path is exercised only by unit-level tests.
+
 **Not verified in batch 10:** the JD extraction endpoint against a real PDF and
 a live Anthropic key — it was stubbed at the network boundary in every test, so
 the prompt and the 502/422 paths are unexercised. The rendered welcome sheet and
@@ -1867,9 +2066,46 @@ exposed these. Fix 10 first; it is one line and it unblocks reports.
     `/ws/video` before a session exists, so there is nothing to attribute
     events to. Monitoring genuinely starts at the interview.
 
+### Raised by batch 12
+
+29. **Quick-tunnel PALs accumulate on the Tavus account.** The cache stops a
+    *restart* from creating one, but every fresh `docker compose up` gets a new
+    hostname and therefore a new PAL, and nothing ever deletes the old ones.
+    `DELETE /v2/pals/{id}` on shutdown, or a periodic sweep, would fix it. A
+    named tunnel avoids the problem entirely.
+30. **`docker compose down -v` rotates the generated `TAVUS_LLM_API_KEY`.** Any
+    PAL created with the old key can no longer authenticate to this backend,
+    with the usual silent symptom — the avatar joins and never speaks. Harmless
+    while PALs are per-boot anyway; a trap the moment someone pins one.
+31. **The backend container runs as root** and the bind mount gives it write
+    access to `server/`. Fine locally, not fine anywhere else. A non-root
+    `USER` plus narrower mounts is the fix before this goes near a shared
+    machine.
+32. **`server/logs/` and `server/reports/` are bind-mounted**, so real candidate
+    PII lands on the host exactly as it does natively. That is intentional —
+    losing reports with the container would be worse — but it means the Docker
+    path inherits every warning about that data, including that earlier reports
+    remain in git history.
+33. **The tunnel service has no healthcheck.** The backend's 90-second poll is
+    the only thing detecting a cloudflared that never registers, and its
+    failure mode is a container that exits rather than a diagnosis. The image
+    has no shell, so a compose healthcheck needs a different approach.
+
 ---
 
 ## Quick start for a new collaborator
+
+**With Docker** (§29) — one command, and no tunnel URL to paste:
+
+```bash
+cp server/.env.example server/.env   # add ANTHROPIC_API_KEY (+ Tavus keys for the avatar)
+docker compose up --build            # → :5173 frontend, :8100 backend
+docker compose down                  # stop
+```
+
+Leave `TAVUS_LLM_BASE_URL` blank — it is resolved at boot and injected.
+
+**Natively**, if you would rather not use containers:
 
 ```bash
 # 1. install
