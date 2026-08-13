@@ -61,6 +61,40 @@ const InterviewPage: React.FC = () => {
   const [showWarning, setShowWarning] = useState(false);
   const [tabSwitches, setTabSwitches] = useState(0);
 
+  // ---- integrity reporting ------------------------------------------------
+  // Tab switches, fullscreen exits and clipboard use are only observable in
+  // the page the candidate is actually using — the backend runs elsewhere, so
+  // nothing server-side can see them. These were previously counted into
+  // React state, shown once in the exit dialog and lost on unmount.
+  //
+  // Fire-and-forget: an interview must never break because telemetry failed,
+  // so every call swallows its own errors. `keepalive` lets the last event
+  // survive the page transition out of the interview.
+  const reportEvent = useCallback(
+    (type: string, detail: Record<string, number | string> = {}) => {
+      const sessionId = sessionStorage.getItem("sessionId");
+      if (!sessionId) return;
+      fetch(apiUrl("/api/interview/event"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, type, ...detail }),
+        keepalive: true,
+      }).catch(() => {});
+    },
+    []
+  );
+
+  // Keystrokes are counted, not logged individually: a 45-minute interview
+  // would otherwise post thousands of requests that say nothing on their own.
+  // What matters is the total, next to how much arrived by paste.
+  const keystrokeBufferRef = useRef(0);
+  const flushKeystrokes = useCallback(() => {
+    const count = keystrokeBufferRef.current;
+    if (count <= 0) return;
+    keystrokeBufferRef.current = 0;
+    reportEvent("keystrokes", { keystrokes: count });
+  }, [reportEvent]);
+
   // Video/Audio states
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [faceStatus, setFaceStatus] = useState<"in_frame" | "out_of_frame">("in_frame");
@@ -287,7 +321,14 @@ const InterviewPage: React.FC = () => {
 
   // Setup video WebSocket for face detection
   const setupVideoWebSocket = () => {
-    const ws = new WebSocket(wsUrl("/ws/video"));
+    // The session id rides along so out-of-frame events can be attributed to
+    // this interview and reach the report. Without it the backend still runs
+    // the face tracking, but every event lands in one global log with no way
+    // to tell whose interview it belonged to.
+    const sessionId = sessionStorage.getItem("sessionId");
+    const ws = new WebSocket(
+      wsUrl("/ws/video") + (sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "")
+    );
 
     ws.onopen = () => {
       console.log("Video WebSocket connected");
@@ -800,19 +841,44 @@ const InterviewPage: React.FC = () => {
     }
   }, [fullscreenExits, showExitDialog]);
 
+  // Report each fullscreen exit once. Keyed off the count rather than the
+  // event so it cannot double-report: the hook already owns the counting, and
+  // this effect only reacts when the number actually changes.
+  const reportedExitsRef = useRef(0);
+  useEffect(() => {
+    if (fullscreenExits > reportedExitsRef.current) {
+      reportedExitsRef.current = fullscreenExits;
+      reportEvent("fullscreen_exit");
+    }
+  }, [fullscreenExits, reportEvent]);
+
   // Detect tab switches
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         setTabSwitches((prev) => prev + 1);
         console.warn("Tab switch detected");
+        reportEvent("tab_switch");
+        // The candidate is leaving the page, so send any typing not yet
+        // batched out - this is exactly when it would otherwise be lost.
+        flushKeystrokes();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [reportEvent, flushKeystrokes]);
+
+  // Batch typing up to the backend while the interview runs, and once more on
+  // unmount so the last burst is not lost.
+  useEffect(() => {
+    const id = setInterval(flushKeystrokes, 20000);
+    return () => {
+      clearInterval(id);
+      flushKeystrokes();
+    };
+  }, [flushKeystrokes]);
 
   // Prevent shortcuts
   useEffect(() => {
@@ -1520,6 +1586,27 @@ const InterviewPage: React.FC = () => {
                   <textarea
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
+                    // Integrity signals for the coding round. Paste is the one
+                    // that means something here — a solution that arrived
+                    // whole is a different artefact from one that was typed —
+                    // so it is recorded with its size, next to a count of how
+                    // much was actually typed. Neither blocks the candidate:
+                    // pasting a helper or a test case is normal, and the
+                    // report shows the numbers rather than judging them.
+                    onPaste={(e) =>
+                      reportEvent("paste", {
+                        chars: e.clipboardData.getData("text").length,
+                        source: "code_editor",
+                      })
+                    }
+                    onCopy={() => reportEvent("copy", { source: "code_editor" })}
+                    onKeyDown={(e) => {
+                      // Printable characters only: modifiers, arrows and the
+                      // shortcuts around them are not "typing the solution".
+                      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+                        keystrokeBufferRef.current += 1;
+                      }
+                    }}
                     disabled={codeLocked}
                     placeholder="Write your code here"
                     aria-label="Your solution"

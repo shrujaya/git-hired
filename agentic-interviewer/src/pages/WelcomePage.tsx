@@ -15,11 +15,15 @@ import BrandMark from "../components/BrandMark";
 
 // Every figure below is the system's real behaviour, not marketing copy:
 // 2 warm-up + 5 core + 3 advanced questions, one of which is the coding
-// exercise; five roles on the next page; MAX_INTERVIEW_DURATION is 45.
+// exercise; MAX_INTERVIEW_DURATION is 45.
+//
+// Roles are "5+" rather than "05" because the count is not five: five are
+// listed, and any other role can be supplied as a job description, so there
+// is no ceiling. Two glyphs keeps the rhythm of the numerals around it.
 const FACTS = [
   { value: "10", label: "Questions", note: "Warm-up, core, then advanced. The difficulty follows your answers." },
   { value: "01", label: "Coding exercise", note: "Written in the editor beside the call, with hints if you stall." },
-  { value: "05", label: "Roles", note: "Pick the one you are interviewing for; questions are built around it." },
+  { value: "5+", label: "Roles", note: "Five listed, or bring your own — paste or attach any job description and the questions are built from that." },
   { value: "45", label: "Minutes, max", note: "One sitting. It ends itself once the last question is answered." },
 ];
 
@@ -32,7 +36,7 @@ const STAGES = [
   {
     n: "02",
     title: "Role & resume",
-    body: "Attach your resume and choose a role. Both are read before the first question is asked.",
+    body: "Attach your resume and pick a role — one of the five listed, or your own job description. Both are read before the first question is asked.",
   },
   {
     n: "03",

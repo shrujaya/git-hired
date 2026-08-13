@@ -326,6 +326,13 @@ Generate a comprehensive interview report based on the complete interview transc
 **Resume Analysis:**
 {resume_analysis}
 
+**Interview Monitoring Data:**
+Observed automatically during the interview. These are measurements, not
+accusations, and every one of them has an innocent explanation - a notification,
+a delivery at the door, a candidate who drafts in their own editor. Report what
+was observed and let the hiring manager judge it.
+{proctoring_summary}
+
 **Report Structure:**
 
 1. **EXECUTIVE SUMMARY**
@@ -399,6 +406,15 @@ Generate a comprehensive interview report based on the complete interview transc
     - Notable observations
     - Cultural fit indicators
     - Any concerns to address
+
+11. **INTERVIEW CONDITIONS**
+    - State the monitoring figures given above as plain observations
+    - Say explicitly whether anything is worth a second look, and if nothing
+      is, say that in one line rather than padding the section
+    - Do NOT accuse the candidate of cheating, and do NOT let these figures
+      change any score above - they measure the room, not the answers
+    - If no monitoring data was captured, say so; absence of data is not
+      evidence of good conduct
 
 **Scoring Guidelines:**
 - 90-100: Exceptional candidate, strong hire
@@ -580,7 +596,8 @@ def get_report_generator_prompt(
     job_role: str,
     interview_date: str,
     interview_duration: int,
-    resume_analysis: str
+    resume_analysis: str,
+    proctoring_summary: str = ""
 ) -> str:
     """Get formatted report generator prompt"""
     return REPORT_GENERATOR_PROMPT.format(
@@ -590,5 +607,7 @@ def get_report_generator_prompt(
         job_role=job_role,
         interview_date=interview_date,
         interview_duration=interview_duration,
-        resume_analysis=resume_analysis
+        resume_analysis=resume_analysis,
+        proctoring_summary=proctoring_summary
+        or "No integrity monitoring data was captured for this session."
     )

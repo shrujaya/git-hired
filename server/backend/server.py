@@ -43,6 +43,7 @@ from agents.resume_evaluator import ResumeEvaluatorAgent
 from agents.interviewer import InterviewerAgent
 from agents.report_generator import ReportGeneratorAgent
 from agents.response_utils import first_text, sanitize_candidate_speech
+from agents.proctoring import ProctoringLog
 
 # Import config
 from config.settings import config, validate_config
@@ -350,9 +351,13 @@ class SessionManager:
             "created_at": datetime.now().isoformat(),
             "status": "active",
             "coding_question": None,
-            "coding_submitted": False
+            "coding_submitted": False,
+            # Integrity signals for this interview: face tracking from
+            # /ws/video plus what the browser reports. Created here so every
+            # writer has somewhere to put them from the first frame onward.
+            "proctoring": ProctoringLog(session_id),
         }
-        
+
         return session_id
     
     def get_session(self, session_id: str) -> Optional[Dict]:
@@ -435,9 +440,20 @@ async def root():
 
 #video tracking
 @app.websocket("/ws/video")
-async def receive_video(websocket: WebSocket):
+async def receive_video(websocket: WebSocket, session_id: Optional[str] = None):
+    """
+    Face/eye tracking for the camera feed.
+
+    `session_id` is a query parameter and is optional: the device-check page
+    connects before a session exists. When it is present, out-of-view events
+    are attributed to that interview's proctoring log and reach the report -
+    previously every event went to one global jsonl with no session id, so the
+    data existed but could never be tied to an interview.
+    """
     await websocket.accept()
-    print("WebSocket connection accepted")
+    proctoring = (session_manager.get_session(session_id) or {}).get("proctoring") \
+        if session_id else None
+    print(f"WebSocket connection accepted (session {session_id or 'device-check'})")
 
     out_of_view = False
     out_start_time = None
@@ -482,8 +498,14 @@ async def receive_video(websocket: WebSocket):
                 out_of_view = False
                 out_duration = time.time() - out_start_time
                 write_log("Out of view", duration=out_duration)
+                # Ignore the flicker of a head turn; a glance away is not an
+                # event worth putting in front of a hiring manager.
+                if proctoring and out_duration >= 2.0:
+                    proctoring.record(
+                        "face_out_of_view", duration=round(out_duration, 1)
+                    )
                 print(f"[LOG] Out of frame duration: {out_duration:.2f}s")
-                await websocket.send_text("face_in_frame") 
+                await websocket.send_text("face_in_frame")
 
             if eyes_detected and face_in_center:
                 await websocket.send_text("face_in_frame")
@@ -494,9 +516,17 @@ async def receive_video(websocket: WebSocket):
         print("Disconnected:", e)
 
     finally:
+        # The candidate was still out of frame when the socket dropped, so the
+        # event never got its closing edge above.
         if out_of_view and out_start_time:
             total_duration = time.time() - out_start_time
             write_log("Out of view", duration=total_duration)
+            if proctoring and total_duration >= 2.0:
+                proctoring.record(
+                    "face_out_of_view",
+                    duration=round(total_duration, 1),
+                    note="still out of view when the camera feed ended",
+                )
 
 
 @app.get("/health")
@@ -1051,6 +1081,53 @@ def _generate_report_task(
         print(f"⚠️  Report generation failed for {session_id}: {e}")
 
 
+class ProctoringEvent(BaseModel):
+    session_id: str
+    type: str
+    # Optional, event-specific: seconds out of view, characters pasted, how
+    # many keystrokes this batch covers.
+    duration: Optional[float] = None
+    chars: Optional[int] = None
+    keystrokes: Optional[int] = None
+    source: Optional[str] = None
+
+
+@app.post("/api/interview/event")
+async def record_proctoring_event(event: ProctoringEvent):
+    """
+    Record an integrity event observed in the browser.
+
+    Tab switches, fullscreen exits, clipboard use and typing volume can only
+    be seen by the page the candidate is actually using - the backend runs
+    somewhere else entirely. Previously the UI counted these into React state,
+    showed them once in the exit dialog and dropped them on unmount.
+
+    Deliberately forgiving: an unknown session is a no-op rather than a 404,
+    and every field is optional. This is fire-and-forget telemetry sent from
+    handlers like `visibilitychange`, and a rejected request there would
+    surface as a console error in the middle of someone's interview.
+    """
+    session = session_manager.get_session(event.session_id)
+    if not session:
+        return {"status": "ignored"}
+
+    proctoring = session.get("proctoring")
+    if not proctoring:
+        proctoring = session["proctoring"] = ProctoringLog(event.session_id)
+
+    if event.type == "keystrokes":
+        proctoring.record_keystrokes(event.keystrokes or 0)
+    else:
+        proctoring.record(
+            event.type,
+            duration=event.duration,
+            chars=event.chars,
+            source=event.source,
+        )
+
+    return {"status": "recorded"}
+
+
 @app.post("/api/interview/end")
 async def end_interview(request: EndInterviewRequest, background: BackgroundTasks):
     """
@@ -1088,6 +1165,24 @@ async def end_interview(request: EndInterviewRequest, background: BackgroundTask
         # The agent autosaves every turn, so this is belt-and-braces - it
         # captures the closing line and the final summary footer.
         interviewer.save_transcript(request.session_id)
+
+        # Must land before the report task is queued: the generator reads
+        # proctoring.json off disk, so an unsaved log means a report with no
+        # integrity section. Failures are swallowed for the same reason the
+        # transcript's are - this is the last step of a finished interview.
+        proctoring = session.get("proctoring")
+        if proctoring:
+            try:
+                proctoring.save(request.session_id)
+                summary = proctoring.summary()
+                print(
+                    f"🛡️  Proctoring: {summary['tab_switches']} tab switch(es), "
+                    f"{summary['fullscreen_exits']} fullscreen exit(s), "
+                    f"{summary['face_out_of_view_count']} out-of-view, "
+                    f"{summary['pastes']} paste(s)"
+                )
+            except Exception as e:
+                print(f"⚠️  Could not save proctoring log: {e}")
 
         # The rubric runs in the background when the coding round closes, so
         # prefer the agent's result and fall back to a neutral 5 when the

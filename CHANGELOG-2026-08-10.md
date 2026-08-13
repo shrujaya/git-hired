@@ -18,8 +18,9 @@ The work landed in three batches:
 | **8** | Dark end to end: ink / acid-lime / electric-cyan (§19) | Committed in `9e7956c`…`1c6deb7` |
 | **9** | Exact colour + motion values taken from the second mock (§20), email diagnosis (§21) | Committed as [`1c6deb7`](https://github.com/shrujaya/git-hired/commit/1c6deb7) |
 | **10** | PDF reports, a cover sheet before the flow, fullscreen that works, bring-your-own job description, one logs root (§22–§26) | Uncommitted working tree |
+| **11** | Proctoring signals reach the report (§27) | Uncommitted working tree |
 
-`git diff 2f346e3` reproduces all ten batches together.
+`git diff 2f346e3` reproduces all eleven batches together.
 
 > **Correction.** §10 previously described a per-turn transcript autosave as
 > part of batch 3. It was not in `cbc3096` — the section described work that
@@ -30,7 +31,7 @@ The work landed in three batches:
 
 ## TL;DR for the next person
 
-Eleven things happened. The first eight were each triggered by the previous one
+Twelve things happened. The first eight were each triggered by the previous one
 failing; the rest are deliberate work:
 
 1. **The repo did not run on Windows.** Fixed the setup/run scripts, the venv
@@ -73,6 +74,11 @@ failing; the rest are deliberate work:
     no way back; fullscreen had never once worked because it was requested
     without a user gesture; and a candidate could only interview for one of five
     fixed roles (§22–§25).
+12. **The proctoring was watching nothing.** Face tracking, tab switches and
+    keystroke monitoring all existed as code and none of it reached the
+    report: the face events had no session id, the tab counts never left the
+    browser, and the keystroke logger watched the server's own keyboard. All
+    three now land in one per-session log and a report section (§27).
 
 **If you only read one thing:** the backend needs a **public URL**
 (`TAVUS_LLM_BASE_URL`) for the avatar to work at all. Locally that means running
@@ -1349,6 +1355,78 @@ known issue 1.
 
 ---
 
+## 27. Proctoring signals reach the report
+
+*(Batch 11 — uncommitted)*
+
+Three kinds of integrity evidence were being produced and **none of it reached
+the report**, each for a different reason:
+
+| Signal | What existed | Why it never landed |
+| --- | --- | --- |
+| Face / eye tracking | `/ws/video` computed out-of-view durations | Written to one global `eye_tracking.jsonl` with **no session id** — unattributable even in principle |
+| Tab switches, fullscreen exits | Counted in React state | Shown once in the exit dialog, discarded on unmount — never left the browser |
+| Keystrokes | `server/src/input_tracker.py` | A `pynput` script listening to **the OS it runs on**. The backend is not the candidate's machine, so wiring it in would have logged whoever was sitting at the server |
+
+[`server/agents/proctoring.py`](server/agents/proctoring.py) (new) is the one
+place it all lands, per session, saved as `logs/<session_id>/proctoring.json`
+next to the transcript.
+
+**Face tracking is now attributed.** `/ws/video` takes an optional
+`session_id` query parameter — optional because the device-check page connects
+before a session exists. Only absences of **2 seconds or more** are recorded; a
+head-turn is not an event worth putting in front of a hiring manager.
+
+**The browser reports what only it can see** via `POST /api/interview/event`:
+tab switches, fullscreen exits, and — in the code editor — paste, copy and a
+count of characters actually typed. Keystrokes are **batched every 20s** rather
+than sent per key, and flushed on tab-switch and unmount. The endpoint is
+deliberately forgiving: an unknown session is a no-op rather than a 404, and
+unknown event types are stored rather than rejected. This is fire-and-forget
+telemetry sent from `visibilitychange` handlers, and a rejected request there
+would surface as an error in the middle of someone's interview.
+
+**On keystrokes specifically.** The `pynput` script is not wired in, and should
+not be. The browser-side equivalents are the signals that mean something for a
+remote interview, and the one worth stating outright is derived rather than
+raw: when pasted characters exceed five times what was typed, the section says
+so explicitly. That is the difference between a candidate who wrote the
+solution and one who brought it.
+
+**The report gets a section 11, INTERVIEW CONDITIONS**, and the prompt is
+explicit that these are measurements with innocent explanations — it must not
+accuse anyone, and must not let the figures move any score. From a real
+end-to-end run:
+
+> The paste-to-keystroke ratio on the coding submission is worth a second look
+> […] The tab/fullscreen exits and brief camera absence are common and have
+> plausible innocent explanations (notifications, environment noise, etc.);
+> none of these figures have been used to adjust any score above.
+
+**Absence of data is not a clean bill of health.** A session that recorded
+nothing says "recorded no events"; a session that reported nothing says the
+data is missing and must not be read as good conduct. Those are different
+sentences on purpose.
+
+### A dependency that was declared but never installed
+
+`reportlab>=4.0` went into `requirements.txt` with the PDF work in batch 10,
+but was never installed into the local `.venv`. Since
+`report_generator.py` imports `report_pdf.py` at module scope, and `server.py`
+imports the report generator, **the backend could not start at all** — it died
+on `ModuleNotFoundError: No module named 'reportlab'` before serving anything.
+Installed (5.0.0). Anyone pulling batch 10 needs
+`pip install -r requirements.txt`.
+
+**Verified:** 44 new assertions (recording, summarising, persistence
+round-trip, the report prompt, endpoint behaviour including unknown sessions
+and unknown event types, and the video socket's optional session id); all five
+earlier suites still pass (138); `tsc --noEmit` clean; production build passes;
+and one **live end-to-end report** generated against the real Anthropic key,
+confirming the section renders with the intended tone.
+
+---
+
 ## Files
 
 **Added**
@@ -1365,6 +1443,7 @@ known issue 1.
 | [`server/agents/report_pdf.py`](server/agents/report_pdf.py) | Markdown → PDF for the emailed report (batch 10) |
 | [`agentic-interviewer/src/pages/WelcomePage.tsx`](agentic-interviewer/src/pages/WelcomePage.tsx) | Cover sheet at `/` (batch 10) |
 | [`agentic-interviewer/src/components/BrandMark.tsx`](agentic-interviewer/src/components/BrandMark.tsx) | The `>_` mark, optionally a link home (batch 10) |
+| [`server/agents/proctoring.py`](server/agents/proctoring.py) | Per-session integrity log + its report wording (batch 11) |
 
 **Modified (batch 1)** — `server/backend/server.py`, `server/config/settings.py`,
 `server/agents/report_generator.py` (missing `encoding='utf-8'` on a transcript
@@ -1438,6 +1517,17 @@ returns it, attaches as `application/pdf`), `requirements.txt` (`reportlab`),
 `/device-check`), `src/components/ProtectedRoute.tsx` (explicit-home state),
 `src/components/FlowHeader.tsx` (uses `BrandMark`),
 `src/pages/InterviewPage.tsx` (fullscreen retry + prompt).
+
+**Modified (batch 11)** — `server/backend/server.py` (`ProctoringEvent` +
+`POST /api/interview/event`, `/ws/video` takes an optional `session_id`,
+per-session `ProctoringLog` created at session creation and saved by
+`/api/interview/end` before the report is queued),
+`server/agents/report_generator.py` (loads `proctoring.json`, passes the
+summary through `generate_report`), `server/prompts/agent_prompts.py`
+(monitoring block in the prompt, section 11 in the report structure),
+`agentic-interviewer/src/pages/InterviewPage.tsx` (`reportEvent`, batched
+keystrokes, paste/copy handlers on the editor, session id on the video
+socket).
 
 ---
 
@@ -1560,6 +1650,33 @@ where noted.
   batch and produced a complete transcript — see Known issues 10–12 for what it
   exposed.
 
+**Batch 11:** 44 assertions, no network except where noted.
+
+- **9** recording and summarising: every event type counts, out-of-view
+  durations total and report their longest, keystrokes accumulate across
+  batches, pasted characters sum.
+- **11** report wording: each figure appears in the section; a paste-dominant
+  submission is flagged and a typed-dominant one is **not**; a session that
+  recorded nothing reads differently from one that reported nothing — the
+  latter says explicitly that it is not evidence of good conduct.
+- **5** persistence: `proctoring.json` round-trips, and rendering from the file
+  is byte-identical to rendering from the live object. This matters because
+  the report runs in a background task and only ever sees the file.
+- **6** the prompt: the figures reach it, it forbids accusing the candidate,
+  it forbids letting them move a score, section 11 exists, and omitting the
+  summary still formats.
+- **9** the endpoint and socket via `TestClient`: each event type is accepted
+  and lands on the session, an **unknown session is a no-op rather than a
+  404**, an unknown event type is stored rather than rejected, and
+  `/ws/video` takes an optional `session_id` while ignoring sub-2-second
+  glances.
+- **Live end-to-end** against the real Anthropic key: a report generated from
+  a real session with a seeded proctoring log, confirming section 11 renders
+  with the intended tone — it recommended a follow-up on the paste ratio and
+  stated in the same paragraph that no score had been adjusted.
+- All five earlier suites still pass (138 assertions); `tsc --noEmit` clean;
+  production build passes.
+
 **Batch 10:** 71 assertions — 18 unit, 53 driven through a real Chromium via
 Playwright against the dev server with the backend stubbed.
 
@@ -1625,6 +1742,10 @@ plumbing.
 4. ~~**`server/src/eye_tracker.py` / `input_tracker.py` have CWD-relative log
    paths.**~~ Paths **fixed in batch 10** (§26). They still call `open()`
    without `encoding`, which would break on Windows with non-ASCII content.
+   Note that `input_tracker.py` is **deliberately not wired into the server**
+   (§27): `pynput` watches the machine the backend runs on, which is not the
+   candidate's. Delete it or keep it as a standalone tool — do not "fix" it by
+   importing it.
 5. **Bundle size** — `@daily-co/daily-js` pushes the JS bundle past 500 kB
    (598 kB / 178 kB gzipped as of batch 5). Consider `manualChunks` or a
    dynamic import if it matters.
@@ -1715,6 +1836,36 @@ exposed these. Fix 10 first; it is one line and it unblocks reports.
     fullscreen request (+238 lines in batch 10). The custom-role panel is a
     self-contained component waiting to be extracted; it was left inline to
     keep this batch's diff readable.
+
+### Raised by batch 11
+
+24. **`pip install -r requirements.txt` is not optional any more.**
+    `reportlab` was declared in batch 10 but never installed locally, and
+    because `server.py` imports the report generator, which imports the PDF
+    renderer at module scope, **the backend refused to start** rather than
+    degrading. Anyone pulling batch 10 or later must reinstall. A lazy import
+    inside `save_report` would make a missing PDF library cost the PDF instead
+    of the whole server.
+25. **The proctoring log lives in memory until the interview ends.** It is an
+    object on the session and is only written to disk by
+    `/api/interview/end`. A backend restart mid-interview loses every event,
+    and a candidate who closes the tab never triggers the save — the same gap
+    as known issue 15, now with more to lose. Writing after each event, or on
+    a timer, would fix it.
+26. **`/api/interview/event` is unauthenticated**, like
+    `/api/job-description/extract` (issue 19). Anyone who can reach the
+    backend and guess a session id can inject integrity events into someone
+    else's report. The session id is a UUID so it is not guessable in
+    practice, but this endpoint *writes to a hiring decision* and deserves the
+    same treatment as `/v1/chat/completions` before any public deployment.
+27. **Keystrokes are only counted in the code editor.** Typing elsewhere —
+    including a second window the candidate is really working in — is
+    invisible, which is the honest limit of what a web page can see. The
+    paste-to-typed ratio is the signal that survives this; do not read a low
+    keystroke count on its own as evidence of anything.
+28. **The device-check page reports no proctoring**, by design: it connects to
+    `/ws/video` before a session exists, so there is nothing to attribute
+    events to. Monitoring genuinely starts at the interview.
 
 ---
 

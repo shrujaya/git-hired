@@ -21,6 +21,7 @@ from config.settings import config
 from prompts.agent_prompts import get_report_generator_prompt
 from agents.response_utils import first_text
 from agents.report_pdf import render_report_pdf
+from agents.proctoring import ProctoringLog, summary_to_report_section
 
 
 class ReportGeneratorAgent:
@@ -52,7 +53,8 @@ class ReportGeneratorAgent:
         job_role: str,
         interview_date: str,
         interview_duration: int,
-        resume_analysis: str
+        resume_analysis: str,
+        proctoring_summary: str = ""
     ) -> Dict[str, Any]:
         """
         Generate comprehensive interview report
@@ -65,7 +67,8 @@ class ReportGeneratorAgent:
             interview_date: Date of interview
             interview_duration: Duration in minutes
             resume_analysis: Resume analysis text
-            
+            proctoring_summary: Integrity observations, as plain text
+
         Returns:
             Dictionary with report and metadata
         """
@@ -79,9 +82,10 @@ class ReportGeneratorAgent:
             job_role=job_role,
             interview_date=interview_date,
             interview_duration=interview_duration,
-            resume_analysis=resume_analysis
+            resume_analysis=resume_analysis,
+            proctoring_summary=proctoring_summary
         )
-        
+
         # Generate report
         response = self.client.messages.create(
             model=self.model,
@@ -335,6 +339,14 @@ AI Interview System
         else:
             duration = 30  # Default
         
+        # Integrity observations, if the session recorded any. Read off disk
+        # rather than passed in: the report runs in a background task after
+        # the response has gone out, and /api/interview/end saves this file
+        # immediately before queueing it.
+        proctoring_summary = summary_to_report_section(
+            ProctoringLog.load_summary(session_id)
+        )
+
         # Generate report
         report_data = self.generate_report(
             interview_transcript=transcript,
@@ -343,6 +355,7 @@ AI Interview System
             job_role=job_role,
             interview_date=datetime.now().strftime("%Y-%m-%d"),
             interview_duration=duration,
+            proctoring_summary=proctoring_summary,
             resume_analysis=resume_analysis
         )
         
