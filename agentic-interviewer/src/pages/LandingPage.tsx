@@ -168,56 +168,73 @@ function LandingPage() {
     : "";
 
   return (
-    <div className="min-h-screen bg-mist text-ink flex flex-col">
+    <div className="min-h-screen sheet text-ink flex flex-col">
       <FlowHeader step={2} />
 
       {/* Session-init loader. Resume analysis is a real Claude round trip, so
           this can take a while — say so instead of leaving a frozen button. */}
       {isLoading && (
-        <div className="fixed inset-0 z-50 bg-[rgba(245,247,247,0.92)] backdrop-blur-sm flex items-center justify-center px-6">
-          <div className="w-[420px] max-w-full rounded-[14px] border border-line bg-white p-8 text-center animate-fadeup">
-            <div className="w-12 h-12 rounded-full border-2 border-brand/20 border-t-brand animate-spin mx-auto mb-5" />
-            <h2 className="text-lg font-semibold tracking-tight mb-2">
+        <div className="fixed inset-0 z-50 bg-paper/95 backdrop-blur-sm flex items-center justify-center px-6">
+          <div className="w-[440px] max-w-full border-2 border-ink bg-card p-8 animate-fadeup">
+            <div className="flex items-center gap-2.5 mb-5">
+              <span className="w-2 h-2 bg-signal animate-recblink" />
+              <span className="font-mono text-[9.5px] tracking-[0.14em] uppercase text-inksub">
+                Processing
+              </span>
+            </div>
+            <h2 className="font-display font-extrabold text-[26px] tracking-title leading-none mb-3">
               Preparing your interview
             </h2>
-            <p className="text-[13.5px] leading-relaxed text-muted mb-4">
+            <p className="text-[14px] leading-relaxed text-inksub mb-5">
               We're reading your resume and briefing your interviewer on
               {" "}{selectedJob?.title ?? "the role"}. This usually takes under a
               minute — please keep this tab open.
             </p>
-            <div className="font-mono text-[11px] text-faint">
+            <div className="font-mono text-[9.5px] tracking-[0.08em] uppercase text-inkfaint border-t border-rule pt-3">
               analyzing resume · building question plan · starting avatar
             </div>
           </div>
         </div>
       )}
 
-      <div className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-10 py-8 md:py-12 flex flex-col gap-8">
+      <div className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-10 py-8 md:py-12 flex flex-col gap-9">
 
         {/* ---- Heading + resume ---- */}
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-8 lg:gap-12 items-start">
-          <div>
-            <div className="font-mono text-[11px] tracking-[0.09em] uppercase text-brand mb-3">
-              Step 2 of 3
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-8 lg:gap-12 items-start">
+          <div className="reveal" style={{ "--d": "0s" } as React.CSSProperties}>
+            <div className="flex items-center gap-2.5 mb-4">
+              <span className="w-2 h-2 bg-signal" />
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-inksub">
+                Fig. 2 — Role &amp; resume
+              </span>
             </div>
-            <h1 className="text-[26px] md:text-[34px] leading-[1.15] tracking-tight font-semibold mb-2.5">
-              Choose a role and attach your resume
+            <h1 className="font-display font-extrabold text-[38px] md:text-[46px] leading-[1.02] tracking-hero">
+              Choose a role,<br />attach your resume
             </h1>
-            <p className="text-[15px] leading-relaxed text-muted max-w-[56ch]">
+            <span className="redline w-24 mt-5" />
+            <p className="text-[15px] leading-relaxed text-inksub max-w-[56ch] mt-4">
               The interviewer adapts its questions to the role you pick and the
               experience on your resume.
             </p>
 
             {error && (
-              <div className="mt-4 px-4 py-3 rounded-[11px] border border-[#E8CFCC] bg-[#FBF3F2]">
-                <p className="text-[13px] text-[#8C3B33] font-medium">{error}</p>
+              <div className="mt-5 flex items-center gap-3 px-4 py-3 border-2 border-alarm bg-card">
+                <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-alarm flex-shrink-0">
+                  Err
+                </span>
+                <p className="text-[13.5px] text-ink">{error}</p>
               </div>
             )}
           </div>
 
           {/* Resume card */}
-          <div className="border border-line rounded-xl bg-white p-5">
-            <div className="text-[13px] font-semibold mb-3.5">Resume</div>
+          <div
+            className="reveal border-2 border-ink bg-card p-5"
+            style={{ "--d": "0.1s" } as React.CSSProperties}
+          >
+            <div className="text-[13px] font-semibold mb-3.5">
+              Resume
+            </div>
 
             {!selectedFile ? (
               <div
@@ -227,19 +244,17 @@ function LandingPage() {
               >
                 <label
                   className={
-                    "flex flex-col items-center gap-2 px-4 py-6 border border-dashed rounded-[10px] cursor-pointer text-center transition-colors " +
+                    "flex flex-col items-center gap-2 px-4 py-7 border-2 border-dashed cursor-pointer text-center transition-colors " +
                     (isDragging
-                      ? "border-brand bg-[#F5FAFB]"
-                      : "border-[#C9D3D3] bg-[#FBFDFD] hover:border-brand hover:bg-[#F5FAFB]")
+                      ? "border-signal bg-paper"
+                      : "border-inkfaint bg-card hover:border-signal hover:bg-paper")
                   }
                 >
-                  <div className="w-[30px] h-[30px] rounded-lg bg-[#EAF1F2] flex items-center justify-center text-brand text-[15px]">
-                    ↑
-                  </div>
+                  <span className="font-mono text-[15px] text-signal leading-none">↑</span>
                   <div className="text-[13.5px] font-medium">
                     Drop your resume or browse
                   </div>
-                  <div className="font-mono text-[11px] text-[#7A8584]">
+                  <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inkfaint">
                     PDF · max 10 MB
                   </div>
                   <input
@@ -251,29 +266,29 @@ function LandingPage() {
                 </label>
               </div>
             ) : (
-              <div className="flex items-center gap-3 px-3.5 py-3 border border-brand-washline rounded-[10px] bg-[#F3F9FA]">
-                <div className="w-8 h-8 flex-shrink-0 rounded-[7px] bg-brand text-white flex items-center justify-center font-mono text-[10px] font-medium">
+              <div className="flex items-center gap-3 px-3.5 py-3 border-2 border-ink bg-paper">
+                <div className="w-9 h-9 flex-shrink-0 bg-ink text-paper flex items-center justify-center font-mono text-[9px]">
                   {resumeExt}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium truncate">
                     {selectedFile.name}
                   </div>
-                  <div className="font-mono text-[11px] text-muted mt-0.5">
+                  <div className="font-mono text-[9.5px] tracking-[0.06em] uppercase text-inksub mt-1">
                     {resumeSize} · attached
                   </div>
                 </div>
                 <button
                   onClick={removeFile}
                   title="Remove resume"
-                  className="flex-shrink-0 w-[26px] h-[26px] rounded-[7px] border border-brand-washline bg-white text-muted text-[13px] leading-none cursor-pointer hover:text-[#B4342A] hover:border-[#E8CFCC] transition-colors"
+                  className="flex-shrink-0 w-[26px] h-[26px] border border-rule bg-card text-inksub text-[13px] leading-none cursor-pointer hover:text-signal hover:border-signal transition-colors"
                 >
                   ✕
                 </button>
               </div>
             )}
 
-            <div className="text-[12.5px] leading-relaxed text-faint mt-3.5">
+            <div className="text-[12.5px] leading-relaxed text-inkfaint mt-3.5">
               Used only to tailor this interview. Not shared beyond the hiring
               team for this role.
             </div>
@@ -281,15 +296,17 @@ function LandingPage() {
         </div>
 
         {/* ---- Roles ---- */}
-        <div>
-          <div className="flex items-baseline justify-between mb-4">
-            <div className="text-[15px] font-semibold tracking-tight">Open roles</div>
-            <div className="font-mono text-[11.5px] text-faint">
+        <div className="reveal" style={{ "--d": "0.18s" } as React.CSSProperties}>
+          <div className="flex items-baseline justify-between mb-4 border-b-2 border-ink pb-2">
+            <div className="font-display font-bold text-[20px] tracking-sub">
+              Open roles
+            </div>
+            <div className="font-mono text-[10px] tracking-[0.1em] uppercase text-inksub">
               {JOB_TYPES.length} available
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {JOB_TYPES.map((role) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {JOB_TYPES.map((role, i) => {
               const selected = selectedJobType === role.id;
               return (
                 <div
@@ -298,34 +315,39 @@ function LandingPage() {
                   role="button"
                   aria-pressed={selected}
                   className={
-                    "relative px-5 pt-[19px] pb-[17px] rounded-xl cursor-pointer bg-white border transition-colors " +
+                    "relative px-5 pt-[18px] pb-4 cursor-pointer bg-card border-2 transition-[transform,border-color,background] duration-[180ms] ease-out hover:-translate-y-[3px] " +
                     (selected
-                      ? "border-brand shadow-[0_0_0_3px_rgba(14,116,144,0.13)]"
-                      : "border-line hover:border-[#B6C6C8]")
+                      ? "border-signal"
+                      : "border-rule hover:border-inksub")
                   }
                 >
-                  <div className="flex items-start justify-between gap-2.5 mb-3">
-                    <div className="text-[14.5px] font-semibold tracking-tight leading-tight">
+                  {selected && (
+                    <span className="absolute -top-[9px] left-4 px-1.5 bg-signal font-mono text-[8.5px] tracking-[0.12em] uppercase text-black leading-4">
+                      Selected
+                    </span>
+                  )}
+                  <div className="flex items-start justify-between gap-2.5 mb-1">
+                    <div className="text-[14.5px] font-semibold tracking-[-0.012em] leading-tight">
                       {role.title}
                     </div>
-                    {selected && (
-                      <div className="flex-shrink-0 w-[18px] h-[18px] rounded-full bg-brand flex items-center justify-center">
-                        <div className="w-2 h-1 border-l-[1.6px] border-b-[1.6px] border-white -rotate-45 -translate-y-[1px]" />
-                      </div>
-                    )}
+                    <span className="font-mono text-[9px] text-inkfaint flex-shrink-0 mt-0.5">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
                   </div>
-                  <div className="text-[12.5px] text-muted mb-3.5">{role.level}</div>
-                  <div className="flex flex-wrap gap-1.5 mb-[15px]">
+                  <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inksub mb-3.5">
+                    {role.level}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mb-3.5">
                     {role.skills.map((skill) => (
                       <div
                         key={skill}
-                        className="px-2 py-1 rounded-md bg-[#F1F5F5] font-mono text-[10.5px] text-[#46595C]"
+                        className="px-2 py-[3px] border border-rule font-mono text-[9px] text-inksub"
                       >
                         {skill}
                       </div>
                     ))}
                   </div>
-                  <div className="pt-[13px] border-t border-hairline font-mono text-[11px] text-faint line-clamp-2">
+                  <div className="pt-3 border-t border-rule text-[12px] leading-relaxed text-inksub line-clamp-2">
                     {role.description}
                   </div>
                 </div>
@@ -335,20 +357,25 @@ function LandingPage() {
         </div>
 
         {/* ---- Footer CTA ---- */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1.5 pb-4">
-          <div className="text-[13px] text-faint">{readyHint}</div>
+        <div
+          className="reveal flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t-2 border-ink pt-5 pb-4"
+          style={{ "--d": "0.26s" } as React.CSSProperties}
+        >
+          <div className="font-mono text-[10px] tracking-[0.08em] uppercase text-inksub">
+            {readyHint}
+          </div>
           <button
             onClick={handleProceed}
             disabled={!canProceed || isLoading}
             className={
-              "px-6 py-3.5 rounded-[10px] text-[14.5px] font-semibold transition-colors flex items-center justify-center gap-2 " +
+              "px-8 py-4 text-[14.5px] font-semibold tracking-[-0.005em] transition-colors flex items-center justify-center gap-2 " +
               (canProceed && !isLoading
-                ? "bg-brand hover:bg-brand-deep text-white cursor-pointer"
-                : "bg-[#F1F4F4] text-[#A3ADAC] border border-line cursor-not-allowed")
+                ? "bg-signal hover:bg-signal-dark text-black cursor-pointer border-2 border-signal"
+                : "bg-transparent text-inkfaint border-2 border-rule cursor-not-allowed")
             }
           >
             {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {isLoading ? "Preparing…" : "Start interview"}
+            {isLoading ? "Preparing…" : "Start interview →"}
           </button>
         </div>
       </div>

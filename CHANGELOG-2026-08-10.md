@@ -14,6 +14,9 @@ The work landed in three batches:
 | **4** | Transcript log (for real this time), one session id per interview, interview teardown, coding-round loop (§13–§15) | Uncommitted working tree |
 | **5** | UI redesign to the Vantage mock — design only, zero logic changes (§16) | Uncommitted working tree |
 | **6** | The candidate cannot steer the interview (§17) | Uncommitted working tree |
+| **7** | "Drafting office" visual identity replaces the Vantage look (§18) | Uncommitted working tree |
+| **8** | Dark end to end: ink / acid-lime / electric-cyan (§19) | Uncommitted working tree |
+| **9** | Exact colour + motion values taken from the second mock (§20) | Uncommitted working tree |
 
 `git diff 2f346e3` reproduces all four batches together.
 
@@ -925,6 +928,169 @@ and worth keeping in mind when editing these prompts:
 
 ---
 
+## 18. The "drafting office" visual identity
+
+*(Batch 7 — uncommitted. Presentation only, same rule as batch 5: no handler,
+state, API call or route changed. Supersedes the §16 Vantage look at the
+user's direction — the IBM-Plex-plus-teal system read as generic.)*
+
+The concept: an engineering interview styled as an engineering drawing. The
+flow pages are the **drawing sheet** — warm ivory, Prussian-blue ink, a faint
+drafting grid, and the header rebuilt as a proper **title block** (ruled cells,
+mono lettering, the active stage underlined in redline). The interview room is
+the **blueprint**: the same grid exposed on a deep Prussian field. One accent —
+**safety orange, the colour drawings are marked up in** — is reserved for
+anything live, selected, or demanding attention (REC, the active stage, the
+selected role, CTAs, the face warning). Corners are square throughout; drawings
+are not rounded.
+
+- **Type:** Big Shoulders (condensed industrial caps, display) · Atkinson
+  Hyperlegible (body) · Martian Mono (plotter-style labels, dims, annotations).
+- **Texture:** two utility classes in
+  [`index.css`](agentic-interviewer/src/index.css) — `.sheet` (ivory + grid)
+  and `.blueprint` (field + grid), layered CSS gradients only.
+- **Motion:** one orchestrated page-load — `.reveal` elements stagger in via a
+  per-element `--d` delay, and headings underline themselves with a `.redline`
+  that draws left-to-right. `prefers-reduced-motion` disables both.
+- **Detailing that carries the theme:** "Fig. 1 / Fig. 2" eyebrows, numbered
+  checklist and role cards (01–05), corner ticks on the camera preview,
+  "Sheet 2 of 3" in the title block, and a tilted **SUBMITTED** stamp on the
+  results page.
+- The interview room was retinted almost entirely through the Tailwind tokens
+  (`field`/`panel`/`edge`/`tile`…), which is what they exist for; a scripted
+  sweep replaced the ~30 raw hexes (dialogs, transcript colours, scrollbars)
+  and squared the radii. Semantic colours kept their meaning: red = recording/
+  danger, green = live/speaking, amber = warnings, cyan `trace` = interviewer,
+  orange `signal` = CTAs and the active tab.
+
+**Verified:** `tsc --noEmit` clean; production build passes; all four pages
+plus the narrow layout screenshotted in headless Edge. One stray from the
+sweep was caught by the screenshots — the stage's radial gradient still held
+the old teal-green blacks — and fixed.
+
+---
+
+## 19. Dark end to end
+
+*(Batch 8 — uncommitted. Presentation only. Re-skins the §18 drafting system
+onto a user-specified palette; the drawing-sheet structure — title block,
+Fig. eyebrows, numbered cells, redline, reveals — carries over unchanged.)*
+
+The palette, as specified:
+
+| Token | Value | Job |
+| --- | --- | --- |
+| ground | `#0B0B0D` | near-black ink, faint grid on every page |
+| `signal` | `#D3FB50` | acid lime — primary actions, selection state, redline |
+| `trace` | `#4EE0F5` | electric cyan — live signals: mic meter, AI voice, speaking glow |
+| `alarm` / `pass` | `#FF5D5D` / `#3DF08C` | bright red/green for failing/passing output |
+
+The role split is the design's grammar: **lime is the hand** (things you click
+or choose — CTAs with black text, the selected role, checked boxes, the active
+stage, the SUBMITTED stamp) and **cyan is the machine** (things that are alive
+— the mic meter, the AI orb and its speak-pulse, the interviewer's transcript
+dot, the LIVE pill). Errors and the face warning moved from the old orange to
+`alarm` red. `pass` is defined but currently unused — there is no test-runner
+output pane in this app; it is reserved for one.
+
+Atmosphere per the spec: `.sheet` gets a **lime bloom falling from the top**
+of the setup pages; `.blueprint` gets **cyan-and-lime corner glows** in the
+interview room — both layered CSS radial gradients over the grid, no images.
+
+Mechanically this was the token architecture paying off a second time: the
+former light-sheet tokens (`paper`/`ink`/`rule`…) were re-valued to their dark
+equivalents so most markup needed no edits, and a scripted sweep handled the
+semantic reassignments (errors→red, CTAs→lime-on-black, meters→cyan) plus the
+interview room's ~30 hexes. `tsc` clean, build passes, all four pages
+screenshot-verified.
+
+---
+
+## 20. Colour and motion reconciled with the reference mock
+
+*(Batch 9 — uncommitted. Presentation only. Source:
+`AI Interview Platform UI (1)/AI Interview.dc.html` in the workspace root,
+which arrived after §19 and specifies the same palette exactly.)*
+
+§19 built the dark theme from the palette as described in prose; this batch
+replaces the approximations with the mock's literal values and adopts its
+motion spec. The lime/cyan grammar and the drafting-office structure are
+unchanged — this is a calibration pass, not a redesign.
+
+**Colour.** The neutrals were all slightly off: the mock's charcoals are warm
+(`#131318` card, `#26262E` rule, `#F2F2EE` text, `#9A9A93` / `#8B8B85`
+secondaries) where §19 had cooler greys. Applied as token values, so most
+markup needed no edit. Also corrected: error red `#FF5D5D` → `#FF7B72`,
+success green `#3DF08C` → `#7EE787` (which the mock also uses for the LIVE
+pill and the HD badge), lime hover `#E2FF7A` → `#E4FF74`, and destructive
+buttons to the mock's `#C43B30`.
+
+**The orb.** The biggest visible gain. The mock layers a **cyan halo** behind
+it — `radial-gradient(circle at 50% 40%, rgba(78,224,245,0.22) …)` over the
+near-black well — and uses a brighter gradient (`#2CD2E8 → #0B6C86`) with an
+*ink-dark* glyph rather than a pale one. Previously the orb sat flat on the
+stage.
+
+**Atmosphere.** Both background recipes replaced with the mock's exact
+gradients and grid sizes: setup pages get a `120% 58% at 50% -12%` lime bloom
+over a **104px** grid; the interview room gets cyan at `28% 6%` and lime at
+`88% 96%` over a finer **72px** grid.
+
+**Motion.**
+
+- Page-load reveals now use the mock's curve — a 10px rise over `0.6s
+  cubic-bezier(0.2,0.7,0.3,1)` (§18–19 used 6px over 0.45s).
+- All buttons, labels, selects and links ease colour/border/background over
+  `0.16s` instead of snapping.
+- Role cards **lift 3px on hover** with a lime border.
+- The mock's **blinking caret** is now in the transcript: a cyan bar marks the
+  live edge while the interviewer is speaking, driven by the existing
+  `interviewerSpeaking` state.
+
+Everything above respects `prefers-reduced-motion`, which now also disables
+the new transitions.
+
+**Verified:** `tsc --noEmit` clean; production build passes; all four pages
+screenshotted and compared against the mock's own screenshots in
+`AI Interview Platform UI (1)/screenshots/`.
+
+**Type followed** in the same batch, on request: **Bricolage Grotesque /
+Schibsted Grotesk / Azeret Mono**, replacing Big Shoulders / Atkinson /
+Martian Mono.
+
+This was not the "three-line change" it looked like, and the reason is worth
+recording. **Case and tracking are coupled to the typeface.** Big Shoulders is
+a condensed industrial face that wants `uppercase` with *positive* tracking —
+which is how every heading and label in §18 was set. Bricolage is a display
+grotesque built for tight, sentence-case setting at weight 800. Swapping the
+family alone would have kept a treatment actively working against the new
+face, so the treatments moved with it:
+
+- Page headings: `uppercase tracking-wide` → **sentence case** at
+  `tracking-hero` (`-0.036em`), sized down 54px → 46px because the wider face
+  sets larger at the same point size.
+- Mid-size labels (card titles, meter headings, buttons) moved **off** the
+  display face onto Schibsted 500/600, matching the mock's own hierarchy —
+  Bricolage at 15px uppercase would have read as shouting.
+- Small mono labels (`FIG. 1`, `SHEET 1 of 3`, `NOT RECORDED`) kept their
+  uppercase treatment; that is Azeret's job and it did not change in
+  character.
+- Body weights softened one step (`font-bold` → `font-medium`): Schibsted at
+  700 reads heavier than Atkinson did at the same size.
+
+The display face is kept for headings, the "Before you begin" / "Open roles"
+section titles, and the wordmark. The uppercase-drafting look survives only
+where it belongs — in the mono annotations.
+
+**One trap to remember:** `index.css` sets `body { font-family }` and
+`tailwind.config.js` sets `fontFamily.sans`, and *both* have to name the same
+stack. Changing only the Tailwind token left every element without an explicit
+`font-sans` class inheriting a font that was no longer being loaded, so the
+whole app silently fell through to the **serif** fallback. Caught by
+screenshot, not by the build — nothing errors.
+
+---
+
 ## New environment variables
 
 All in [`server/.env.example`](server/.env.example).
@@ -1228,9 +1394,12 @@ exposed these. Fix 10 first; it is one line and it unblocks reports.
 
 ### Raised by the batch-5 redesign
 
-16. **Fonts are loaded from Google Fonts.** `index.html` links IBM Plex Sans
-    and Mono over the network, so the app renders in a fallback face offline
-    or behind a strict CSP. Self-host the two families if that matters.
+16. **Fonts are loaded from Google Fonts.** `index.html` links Bricolage
+    Grotesque, Schibsted Grotesk and Azeret Mono over the network, so the app
+    renders in a fallback face offline or behind a strict CSP. Self-host the
+    three families if that matters. If you change them, change **both**
+    `index.html` and the `sans` stack in `tailwind.config.js` *and* the
+    `body` rule in `index.css` — see the trap in §20.
 17. **`Test.tsx` is misleadingly named.** It is the device-check page and the
     app's entry route (`/`), not a test. Renaming it touches the router and
     the guards, so it was left for a commit that is not a redesign.

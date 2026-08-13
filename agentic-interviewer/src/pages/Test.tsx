@@ -258,100 +258,122 @@ const CameraCheck: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen bg-mist text-ink flex flex-col">
+    <div className="min-h-screen sheet text-ink flex flex-col">
       <FlowHeader step={1} />
 
       <canvas ref={canvasRef} width={640} height={480} className="hidden" />
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-8 lg:gap-14 max-w-[1240px] w-full mx-auto px-5 md:px-10 py-8 md:py-14">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-8 lg:gap-14 max-w-[1240px] w-full mx-auto px-5 md:px-10 py-8 md:py-12">
 
         {/* ---- Left: heading + preview + meters ---- */}
-        <div className="flex flex-col gap-5 min-w-0">
-          <div>
-            <div className="font-mono text-[11px] tracking-[0.09em] uppercase text-brand mb-3">
-              Step 1 of 3
+        <div className="flex flex-col gap-6 min-w-0">
+          <div className="reveal" style={{ "--d": "0s" } as React.CSSProperties}>
+            <div className="flex items-center gap-2.5 mb-4">
+              <span className="w-2 h-2 bg-signal" />
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-inksub">
+                Fig. 1 — Equipment check
+              </span>
             </div>
-            <h1 className="text-[26px] md:text-[34px] leading-[1.15] tracking-tight font-semibold mb-2.5">
-              Check your camera and microphone
+            <h1 className="font-display font-extrabold text-[38px] md:text-[46px] leading-[1.02] tracking-hero">
+              Check your camera<br />and microphone
             </h1>
-            <p className="text-[15px] leading-relaxed text-muted max-w-[52ch]">
+            <span className="redline w-24 mt-5" />
+            <p className="text-[15px] leading-relaxed text-inksub max-w-[52ch] mt-4">
               Your interviewer needs to see and hear you clearly. Nothing on
               this page is recorded.
             </p>
           </div>
 
           {error && (
-            <div className="flex items-center gap-3 px-4 py-3 rounded-[11px] border border-[#E8CFCC] bg-[#FBF3F2] animate-shake">
-              <p className="flex-1 text-[13px] text-[#8C3B33] font-medium">{error}</p>
+            <div className="flex items-center gap-3 px-4 py-3 border-2 border-alarm bg-card animate-shake">
+              <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-alarm flex-shrink-0">
+                Err
+              </span>
+              <p className="flex-1 text-[13.5px] text-ink">{error}</p>
               <button
                 onClick={handleRetry}
                 disabled={isRetrying}
-                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-[#B3352B] hover:bg-[#C43B30] disabled:opacity-60 text-white text-xs font-semibold transition-colors"
+                className="flex-shrink-0 px-3.5 py-1.5 bg-[#C43B30] hover:bg-[#D24A3F] disabled:opacity-60 text-white text-[13px] font-semibold transition-colors"
               >
                 {isRetrying ? "Retrying…" : "Retry"}
               </button>
             </div>
           )}
 
-          {/* Camera preview */}
-          <div className="relative aspect-[16/10] rounded-xl overflow-hidden border border-[#DDE3E3] bg-[#12191A]">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-
-            {!stream && !error && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5">
-                <div className="w-14 h-14 rounded-full border border-dashed border-[#3B4849]" />
-                <div className="font-mono text-[11px] tracking-wider text-[#7A8888]">
-                  waiting for camera…
-                </div>
-              </div>
-            )}
-
-            {/* Status pill */}
-            <div className="absolute top-3.5 left-3.5 flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-[rgba(10,15,16,0.72)] backdrop-blur-md">
-              <div
-                className={
-                  "w-1.5 h-1.5 rounded-full " +
-                  (isStreaming ? "bg-[#34D399]" : "bg-amber-400 animate-recblink")
-                }
+          {/* Camera preview — drawn as a figure with corner ticks */}
+          <div
+            className="reveal relative"
+            style={{ "--d": "0.08s" } as React.CSSProperties}
+          >
+            <div className="relative aspect-[16/10] overflow-hidden border-2 border-ink bg-field">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover"
               />
-              <div className="text-[11px] font-medium text-[#D9E2E2]">
-                {isStreaming ? "Live check" : "Connecting…"}
-              </div>
-            </div>
 
-            {/* Face-position warning, on the preview itself: a dim wash over
-                the video plus corner guides, so the correction is made where
-                the problem is visible. */}
-            {faceStatus === "out_of_frame" && isStreaming && (
-              <div className="absolute inset-0 bg-[rgba(10,15,16,0.55)] flex flex-col items-center justify-center gap-3 pointer-events-none">
-                <div className="w-16 h-16 rounded-full border-2 border-dashed border-amber-400/80" />
-                <div className="px-4 py-2 rounded-lg bg-[rgba(10,15,16,0.85)] backdrop-blur-md border border-amber-400/40 text-center">
-                  <p className="text-[13px] font-semibold text-amber-200">
-                    Face not centered
-                  </p>
-                  <p className="text-[11.5px] text-[#D9E2E2]/80 mt-0.5">
-                    Move so your face sits in the middle of the frame
-                  </p>
+              {!stream && !error && (
+                <div className="absolute inset-0 blueprint flex flex-col items-center justify-center gap-3">
+                  <div className="w-14 h-14 rounded-full border border-dashed border-trace/60" />
+                  <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-dsub">
+                    waiting for camera…
+                  </div>
                 </div>
+              )}
+
+              {/* Status pill */}
+              <div className="absolute top-3.5 left-3.5 flex items-center gap-2 px-2.5 py-1.5 bg-field/85 backdrop-blur-sm border border-edge">
+                <span
+                  className={
+                    "w-1.5 h-1.5 " +
+                    (isStreaming ? "bg-trace" : "bg-signal-dark animate-recblink")
+                  }
+                />
+                <span className="font-mono text-[9.5px] tracking-[0.12em] uppercase text-dtext">
+                  {isStreaming ? "Live check" : "Connecting…"}
+                </span>
               </div>
-            )}
+
+              {/* Face-position warning, on the preview itself */}
+              {faceStatus === "out_of_frame" && isStreaming && (
+                <div className="absolute inset-0 bg-field/60 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                  <div className="w-16 h-16 rounded-full border-2 border-dashed border-alarm" />
+                  <div className="px-4 py-2 bg-field/90 backdrop-blur-sm border border-alarm text-center">
+                    <p className="text-[14px] font-semibold text-alarm">
+                      Face not centered
+                    </p>
+                    <p className="text-[11.5px] text-dsub mt-0.5">
+                      Move so your face sits in the middle of the frame
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Corner ticks */}
+            <span className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-signal" />
+            <span className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-signal" />
+            <div className="flex justify-between mt-2 font-mono text-[8.5px] tracking-[0.14em] uppercase text-inkfaint">
+              <span>Camera preview · 16:10</span>
+              <span>not recorded</span>
+            </div>
           </div>
 
-          {/* Meters */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div className="px-[18px] py-4 rounded-[11px] border border-line bg-white">
+          {/* Meters — ruled cells */}
+          <div
+            className="reveal grid grid-cols-1 sm:grid-cols-2 border-2 border-ink divide-y sm:divide-y-0 sm:divide-x divide-rule bg-card"
+            style={{ "--d": "0.16s" } as React.CSSProperties}
+          >
+            <div className="px-[18px] py-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="text-[13px] font-semibold">Microphone</div>
+                <div className="text-[13px] font-semibold">
+                  Microphone
+                </div>
                 <div
                   className={
-                    "font-mono text-[11px] " +
-                    (audioEnabled ? "text-muted" : "text-[#B3352B]")
+                    "font-mono text-[9.5px] tracking-[0.1em] uppercase " +
+                    (audioEnabled ? "text-inksub" : "text-alarm")
                   }
                 >
                   {audioEnabled ? "detected" : "off"}
@@ -361,22 +383,24 @@ const CameraCheck: React.FC = () => {
                 {bars.map((h, i) => (
                   <div
                     key={i}
-                    className="flex-1 rounded-[2px] bg-brand transition-[height] duration-100"
+                    className="flex-1 bg-trace transition-[height] duration-100"
                     style={{ height: `${audioEnabled ? h : 4}%` }}
                   />
                 ))}
               </div>
-              <div className="text-xs text-muted mt-2.5">
+              <div className="text-xs text-inksub mt-2.5">
                 {audioEnabled
                   ? "Say a few words — you should see movement"
                   : "Allow microphone access to continue"}
               </div>
             </div>
 
-            <div className="px-[18px] py-4 rounded-[11px] border border-line bg-white">
+            <div className="px-[18px] py-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="text-[13px] font-semibold">Connection</div>
-                <div className="font-mono text-[11px] text-muted">
+                <div className="text-[13px] font-semibold">
+                  Connection
+                </div>
+                <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inksub">
                   {isStreaming ? "open" : "…"}
                 </div>
               </div>
@@ -384,16 +408,13 @@ const CameraCheck: React.FC = () => {
                 {[40, 62, 88, 100].map((h, i) => (
                   <div
                     key={i}
-                    className={
-                      "flex-1 rounded-[2px] " +
-                      (isStreaming ? "bg-brand" : "bg-[#DCE3E3]")
-                    }
+                    className={"flex-1 " + (isStreaming ? "bg-trace" : "bg-rule")}
                     style={{ height: `${h}%` }}
                   />
                 ))}
-                <div className="flex-1 rounded-[2px] bg-[#DCE3E3]" style={{ height: "100%" }} />
+                <div className="flex-1 bg-rule" style={{ height: "100%" }} />
               </div>
-              <div className="text-xs text-muted mt-2.5">
+              <div className="text-xs text-inksub mt-2.5">
                 {isStreaming
                   ? "Connected — face tracking is running"
                   : "Reaching the interview server…"}
@@ -403,16 +424,21 @@ const CameraCheck: React.FC = () => {
         </div>
 
         {/* ---- Right: readiness + expectations + continue ---- */}
-        <div className="flex flex-col gap-[18px] min-w-0">
-          <div className="border border-line rounded-xl bg-white overflow-hidden">
-            <div className="px-[22px] pt-5 pb-4 border-b border-hairline">
-              <div className="text-[15px] font-semibold tracking-tight mb-1">
+        <div className="flex flex-col gap-5 min-w-0">
+          <div
+            className="reveal border-2 border-ink bg-card"
+            style={{ "--d": "0.12s" } as React.CSSProperties}
+          >
+            <div className="px-[22px] pt-5 pb-4 border-b-2 border-ink">
+              <div className="font-display font-bold text-[19px] tracking-sub">
                 Before you begin
               </div>
-              <div className="text-[13px] text-muted">Confirm all four to continue.</div>
+              <div className="text-[13px] text-inksub mt-0.5">
+                Confirm all four to continue.
+              </div>
             </div>
-            <div className="flex flex-col">
-              {CHECKS.map((c) => (
+            <div className="flex flex-col divide-y divide-rule">
+              {CHECKS.map((c, i) => (
                 <div
                   key={c.id}
                   onClick={() =>
@@ -427,23 +453,26 @@ const CameraCheck: React.FC = () => {
                       setChecked((prev) => ({ ...prev, [c.id]: !prev[c.id] }));
                     }
                   }}
-                  className="flex gap-[13px] px-[22px] py-[15px] border-b border-hairline last:border-b-0 cursor-pointer hover:bg-[#FAFCFC] transition-colors"
+                  className="flex gap-[13px] px-[22px] py-[15px] cursor-pointer hover:bg-paper transition-colors"
                 >
+                  <span className="font-mono text-[9px] text-inkfaint mt-1 flex-shrink-0">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
                   <div
                     className={
-                      "flex-shrink-0 w-[18px] h-[18px] rounded-[5px] mt-0.5 flex items-center justify-center border-[1.5px] transition-colors " +
+                      "flex-shrink-0 w-[18px] h-[18px] mt-0.5 flex items-center justify-center border-2 transition-colors " +
                       (checked[c.id]
-                        ? "border-brand bg-brand"
-                        : "border-[#C9D1D1] bg-white")
+                        ? "border-signal bg-signal"
+                        : "border-inkfaint bg-card")
                     }
                   >
                     {checked[c.id] && (
-                      <div className="w-[9px] h-[5px] border-l-[1.7px] border-b-[1.7px] border-white -rotate-45 -translate-y-[1px]" />
+                      <div className="w-[9px] h-[5px] border-l-2 border-b-2 border-black -rotate-45 -translate-y-[1px]" />
                     )}
                   </div>
                   <div className="min-w-0">
                     <div className="text-[13.5px] font-medium leading-snug">{c.label}</div>
-                    <div className="text-[12.5px] text-faint leading-relaxed mt-0.5">
+                    <div className="text-[12.5px] text-inksub leading-relaxed mt-0.5">
                       {c.detail}
                     </div>
                   </div>
@@ -452,9 +481,14 @@ const CameraCheck: React.FC = () => {
             </div>
           </div>
 
-          <div className="px-5 py-[18px] rounded-[11px] bg-brand-wash border border-brand-washline">
-            <div className="text-[13px] font-semibold mb-1.5">What to expect</div>
-            <div className="text-[13px] leading-relaxed text-[#46595C]">
+          <div
+            className="reveal px-5 py-[18px] bg-wash border border-washline"
+            style={{ "--d": "0.2s" } as React.CSSProperties}
+          >
+            <div className="font-mono text-[9px] tracking-[0.14em] uppercase text-inksub mb-2">
+              Note — what to expect
+            </div>
+            <div className="text-[13.5px] leading-relaxed text-ink">
               An AI interviewer asks technical questions tailored to your resume,
               including a live coding exercise. Your transcript and code are
               shared with the hiring team afterwards.
@@ -465,17 +499,18 @@ const CameraCheck: React.FC = () => {
             onClick={handleProceed}
             disabled={!canProceed || !allChecked}
             className={
-              "w-full py-3.5 rounded-[10px] text-[14.5px] font-semibold transition-colors " +
+              "reveal w-full py-4 text-[14.5px] font-semibold tracking-[-0.005em] transition-colors " +
               (canProceed && allChecked
-                ? "bg-brand hover:bg-brand-deep text-white cursor-pointer"
-                : "bg-[#F1F4F4] text-[#A3ADAC] border border-line cursor-not-allowed")
+                ? "bg-signal hover:bg-signal-dark text-black cursor-pointer border-2 border-signal"
+                : "bg-transparent text-inkfaint border-2 border-rule cursor-not-allowed")
             }
+            style={{ "--d": "0.26s" } as React.CSSProperties}
           >
             {!allChecked
               ? "Confirm the checklist to continue"
               : !canProceed
               ? "Waiting for your setup…"
-              : "Continue to role selection"}
+              : "Continue to role selection →"}
           </button>
         </div>
       </div>

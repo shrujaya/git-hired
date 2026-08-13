@@ -9,12 +9,68 @@
 }
 
 body {
-  font-family: 'IBM Plex Sans', Helvetica, Arial, sans-serif;
+  /* Must match the `sans` stack in tailwind.config.js: anything without an
+     explicit font class inherits from here, so a stale family name here
+     silently falls through to the serif fallback. */
+  font-family: 'Schibsted Grotesk', Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #F5F7F7;
+  background: #0B0B0D;
+  color: #F2F2EE;
 }
 
 ::selection {
-  background: rgba(14, 116, 144, 0.18);
+  background: rgba(211, 251, 80, 0.24);
+  color: #0B0B0D;
+}
+
+/* Interactive chrome eases between states rather than snapping (mock spec). */
+button, label, select, a {
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+/* ---- Atmosphere (recipes lifted from the reference mock) ---------------
+   Setup pages: a wide 104px grid with a lime bloom falling from the top.
+   Interview room: cyan glow upper-left, lime glow lower-right, over a finer
+   72px grid. Layered gradients only. */
+.sheet {
+  background-color: #0B0B0D;
+  background-image:
+    radial-gradient(120% 58% at 50% -12%, rgba(211, 251, 80, 0.09) 0%, rgba(211, 251, 80, 0) 64%),
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 100% 100%, 104px 104px, 104px 104px;
+}
+
+.blueprint {
+  background-color: #0B0B0D;
+  background-image:
+    radial-gradient(80% 52% at 28% 6%, rgba(78, 224, 245, 0.15) 0%, rgba(78, 224, 245, 0) 58%),
+    radial-gradient(70% 48% at 88% 96%, rgba(211, 251, 80, 0.08) 0%, rgba(211, 251, 80, 0) 60%),
+    linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 72px 72px, 72px 72px;
+}
+
+/* Staggered page-load reveal, on the mock's curve: a 10px rise over 0.6s
+   with a long decelerating tail. Set --d per element. */
+.reveal {
+  opacity: 0;
+  animation: fadeup 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  animation-delay: var(--d, 0s);
+}
+
+/* A rule that draws itself in under a heading. */
+.redline {
+  display: block;
+  height: 3px;
+  background: #D3FB50;
+  transform-origin: left;
+  animation: ruledraw 0.5s ease-out 0.15s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; animation: none; }
+  .redline { animation: none; }
+  button, label, select, a { transition: none; }
 }
