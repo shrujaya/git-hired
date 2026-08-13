@@ -6,9 +6,11 @@ import {
   convertPdfToBase64,
   formatJobDescription,
   initializeSession,
+  extractJobDescriptionFromPdf,
   storeSessionData
 } from "../utils/api.utils";
 import FlowHeader from "../components/FlowHeader";
+import { useFullscreen } from "../hooks/useFullscreen";
 
 const JOB_TYPES = [
   {
@@ -53,8 +55,17 @@ const JOB_TYPES = [
   },
 ];
 
+// The sixth option is not a role, it is a way to supply one. Kept out of
+// JOB_TYPES so nothing that iterates the real roles has to special-case it.
+const CUSTOM_ROLE_ID = "custom";
+
+// Enough text to actually brief an interviewer. A one-line "backend dev"
+// produces questions no better than picking a listed role would.
+const MIN_JD_CHARS = 120;
+
 function LandingPage() {
   const navigate = useNavigate();
+  const { enterFullscreen } = useFullscreen();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedJobType, setSelectedJobType] = useState<string>("");
@@ -62,8 +73,22 @@ function LandingPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const canProceed = selectedFile !== null && selectedJobType !== "";
+  // Custom role: the candidate supplies the job description themselves.
+  const [customTitle, setCustomTitle] = useState("");
+  const [customJd, setCustomJd] = useState("");
+  const [jdFileName, setJdFileName] = useState("");
+  const [isReadingJd, setIsReadingJd] = useState(false);
+  const [jdError, setJdError] = useState("");
+
+  const isCustom = selectedJobType === CUSTOM_ROLE_ID;
   const selectedJob = JOB_TYPES.find((job) => job.id === selectedJobType);
+  const customReady =
+    customTitle.trim().length > 1 && customJd.trim().length >= MIN_JD_CHARS;
+
+  const canProceed =
+    selectedFile !== null &&
+    selectedJobType !== "" &&
+    (isCustom ? customReady : true);
 
   // File handlers
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,8 +131,59 @@ function LandingPage() {
     setError("");
   };
 
+  // Attached job description. Plain text is read here; a PDF goes to the
+  // backend, which already reads PDFs for resumes — the browser has no PDF
+  // parser and shipping one would grow a bundle that is already oversized.
+  // Either way the text lands in the box so it can be checked and edited
+  // before the interview is built from it.
+  const handleJdFile = async (file: File | undefined) => {
+    if (!file) return;
+    setJdError("");
+
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    const isText = /\.(txt|md|markdown)$/i.test(file.name) || file.type.startsWith("text/");
+    if (!isPdf && !isText) {
+      setJdError("Attach a PDF or a text file, or paste the description below.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setJdError("File size must be less than 10MB");
+      return;
+    }
+
+    setIsReadingJd(true);
+    try {
+      const text = isPdf
+        ? await extractJobDescriptionFromPdf(await convertPdfToBase64(file))
+        : await file.text();
+
+      if (!text.trim()) {
+        setJdError("That file looks empty. Paste the description instead.");
+        return;
+      }
+      setCustomJd(text.trim());
+      setJdFileName(file.name);
+    } catch (err) {
+      console.error("Could not read job description:", err);
+      setJdError(
+        err instanceof Error ? err.message : "Could not read that file. Paste the text instead."
+      );
+    } finally {
+      setIsReadingJd(false);
+    }
+  };
+
   const handleProceed = async () => {
     if (!canProceed) return;
+
+    // Go fullscreen here, on the click itself, and not on the interview
+    // page's mount. requestFullscreen() needs transient user activation:
+    // this click is the last one before the interview starts, and the
+    // activation does not survive the awaits below, let alone a route
+    // change. Fullscreen is document-scoped, so it carries into /interview.
+    // Deliberately not awaited — a browser that refuses must not stop the
+    // interview from starting.
+    void enterFullscreen();
 
     setIsLoading(true);
     setError("");
@@ -116,22 +192,26 @@ function LandingPage() {
       // Convert PDF to base64
       const resumeBase64 = await convertPdfToBase64(selectedFile!);
 
-      // Format job description
-      const jobDescription = formatJobDescription(selectedJob!);
+      // Format job description. A custom role is already a job description —
+      // it goes through as written rather than being rebuilt from a template.
+      const jobTitle = isCustom ? customTitle.trim() : selectedJob!.title;
+      const jobDescription = isCustom
+        ? customJd.trim()
+        : formatJobDescription(selectedJob!);
 
       // Initialize session via API
       // The backend reads the candidate's name off the resume it receives.
       const response = await initializeSession({
         resume_base64: resumeBase64,
         job_description: jobDescription,
-        job_role: selectedJob!.title
+        job_role: jobTitle
       });
 
       // Store session data
       storeSessionData({
         resumeFileName: selectedFile!.name,
         selectedJobType: selectedJobType,
-        jobTitle: selectedJob!.title,
+        jobTitle: jobTitle,
         candidateName: response.candidate_name,
         candidateFirstName: response.candidate_first_name,
         sessionId: response.session_id,
@@ -156,7 +236,11 @@ function LandingPage() {
       ? "Attach your resume to continue."
       : !selectedJobType
       ? "Pick a role to continue."
-      : `${selectedJob!.title} · adaptive questions · starts immediately`;
+      : isCustom && !customTitle.trim()
+      ? "Name the role you are applying for."
+      : isCustom && customJd.trim().length < MIN_JD_CHARS
+      ? `Paste or attach the job description — minimum ${MIN_JD_CHARS} characters.`
+      : `${isCustom ? customTitle.trim() : selectedJob!.title} · adaptive questions · starts immediately`;
 
   const resumeExt = selectedFile
     ? (selectedFile.name.split(".").pop() || "pdf").toUpperCase().slice(0, 4)
@@ -302,7 +386,7 @@ function LandingPage() {
               Open roles
             </div>
             <div className="font-mono text-[10px] tracking-[0.1em] uppercase text-inksub">
-              {JOB_TYPES.length} available
+              {JOB_TYPES.length} available · or bring your own
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -353,7 +437,147 @@ function LandingPage() {
                 </div>
               );
             })}
+
+            {/* 06 — bring your own role */}
+            <div
+              onClick={() => setSelectedJobType(CUSTOM_ROLE_ID)}
+              role="button"
+              aria-pressed={isCustom}
+              className={
+                "relative px-5 pt-[18px] pb-4 cursor-pointer bg-card border-2 border-dashed transition-[transform,border-color,background] duration-[180ms] ease-out hover:-translate-y-[3px] " +
+                (isCustom ? "border-signal" : "border-rule hover:border-inksub")
+              }
+            >
+              {isCustom && (
+                <span className="absolute -top-[9px] left-4 px-1.5 bg-signal font-mono text-[8.5px] tracking-[0.12em] uppercase text-black leading-4">
+                  Selected
+                </span>
+              )}
+              <div className="flex items-start justify-between gap-2.5 mb-1">
+                <div className="text-[14.5px] font-semibold tracking-[-0.012em] leading-tight">
+                  Something else
+                </div>
+                <span className="font-mono text-[9px] text-inkfaint flex-shrink-0 mt-0.5">
+                  {String(JOB_TYPES.length + 1).padStart(2, "0")}
+                </span>
+              </div>
+              <div className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inksub mb-3.5">
+                Your own description
+              </div>
+              <div className="flex flex-wrap gap-1.5 mb-3.5">
+                {["Paste", "Attach PDF", "Attach text"].map((chip) => (
+                  <div
+                    key={chip}
+                    className="px-2 py-[3px] border border-dashed border-rule font-mono text-[9px] text-inksub"
+                  >
+                    {chip}
+                  </div>
+                ))}
+              </div>
+              <div className="pt-3 border-t border-rule text-[12px] leading-relaxed text-inksub line-clamp-2">
+                Applying for a role that is not listed? Give us the job
+                description and the questions are built from it.
+              </div>
+            </div>
           </div>
+
+          {/* Custom role editor — only once that card is chosen */}
+          {isCustom && (
+            <div className="border-2 border-ink bg-card p-5 mt-4 animate-fadeup">
+              <div className="flex items-baseline justify-between gap-3 mb-4">
+                <div className="text-[13px] font-semibold">The role you are applying for</div>
+                <span className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-inkfaint">
+                  Fig. 2a
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-3 mb-2">
+                <label className="font-mono text-[9px] tracking-[0.14em] uppercase text-inksub">
+                  Role title
+                </label>
+                <span className="font-mono text-[9px] tracking-[0.14em] uppercase text-inkfaint">
+                  Required
+                </span>
+              </div>
+              <input
+                type="text"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="e.g. Machine Learning Engineer"
+                className="w-full px-3.5 py-2.5 bg-paper border-2 border-rule focus:border-signal focus:outline-none text-[13.5px] text-ink placeholder:text-inkfaint transition-colors"
+              />
+              {/* Said here, next to the empty field, and not only in the hint
+                  under the Start button — a description long enough to start
+                  with and a blank title looks like the button is broken. */}
+              {customJd.trim().length >= MIN_JD_CHARS && !customTitle.trim() && (
+                <p className="text-[12px] text-inksub mt-2">
+                  Name the role to start — the description alone does not say
+                  what you are interviewing for.
+                </p>
+              )}
+
+              <div className="flex items-baseline justify-between gap-3 mt-5 mb-2">
+                <label className="font-mono text-[9px] tracking-[0.14em] uppercase text-inksub">
+                  Job description
+                </label>
+                <label
+                  className={
+                    "font-mono text-[9px] tracking-[0.12em] uppercase px-2.5 py-1.5 border cursor-pointer transition-colors " +
+                    (isReadingJd
+                      ? "border-rule text-inkfaint cursor-wait"
+                      : "border-rule text-inksub hover:border-signal hover:text-signal")
+                  }
+                >
+                  {isReadingJd ? "Reading…" : "↑ Attach a file"}
+                  <input
+                    type="file"
+                    accept=".pdf,.txt,.md,.markdown,text/plain,application/pdf"
+                    disabled={isReadingJd}
+                    onChange={(e) => {
+                      handleJdFile(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <textarea
+                value={customJd}
+                onChange={(e) => setCustomJd(e.target.value)}
+                rows={8}
+                placeholder="Paste the job description here — responsibilities, requirements, the stack. The more specific it is, the more specific your questions will be."
+                className="w-full px-3.5 py-3 bg-paper border-2 border-rule focus:border-signal focus:outline-none text-[13px] leading-relaxed text-ink placeholder:text-inkfaint resize-y transition-colors"
+              />
+
+              {jdError && (
+                <div className="flex items-center gap-3 px-3.5 py-2.5 border-2 border-alarm bg-paper mt-3">
+                  <span className="font-mono text-[9.5px] tracking-[0.1em] uppercase text-alarm flex-shrink-0">
+                    Err
+                  </span>
+                  <p className="flex-1 text-[12.5px] text-ink">{jdError}</p>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
+                <div className="font-mono text-[9.5px] tracking-[0.08em] uppercase text-inkfaint">
+                  {jdFileName ? `Read from ${jdFileName} · editable` : "Paste, or attach a file"}
+                </div>
+                {/* 120 is a floor, not a ceiling — there is no maximum. Read
+                    as "X / 120" it looked like a cap being exceeded. */}
+                <div
+                  className={
+                    "font-mono text-[9.5px] tracking-[0.08em] uppercase " +
+                    (customJd.trim().length >= MIN_JD_CHARS ? "text-signal" : "text-inkfaint")
+                  }
+                >
+                  {customJd.trim().length >= MIN_JD_CHARS
+                    ? `${customJd.trim().length.toLocaleString()} characters`
+                    : `Minimum ${MIN_JD_CHARS} characters`}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ---- Footer CTA ---- */}

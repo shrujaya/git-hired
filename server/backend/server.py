@@ -42,7 +42,7 @@ import time
 from agents.resume_evaluator import ResumeEvaluatorAgent
 from agents.interviewer import InterviewerAgent
 from agents.report_generator import ReportGeneratorAgent
-from agents.response_utils import sanitize_candidate_speech
+from agents.response_utils import first_text, sanitize_candidate_speech
 
 # Import config
 from config.settings import config, validate_config
@@ -61,12 +61,13 @@ face_mesh = mp_face_mesh.FaceMesh(
 )
 
 
-# Log file setup. Anchored to the repo rather than the working directory so
-# the logs land in the same place no matter where the server was launched from.
-log_dir = SERVER_DIR / "src" / "logs"
+# Eye-tracking output. Comes from config so there is one logs root: this used
+# to write into server/src/logs — runtime output inside the source tree, and a
+# second logs directory next to the real one in server/logs.
+log_dir = config.tracking_dir
 log_dir.mkdir(parents=True, exist_ok=True)
 
-log_file = log_dir / "eye_tracking_log.jsonl"
+log_file = log_dir / "eye_tracking.jsonl"
 
 def write_log(event_type, duration=None):
     log_entry = {
@@ -125,6 +126,11 @@ class InterviewResponse(BaseModel):
 class CodingSubmission(BaseModel):
     session_id: str
     code: str
+
+
+class JobDescriptionRequest(BaseModel):
+    # A job description the candidate attached as a PDF, base64 encoded.
+    pdf_base64: str
 
 
 class EndInterviewRequest(BaseModel):
@@ -831,6 +837,76 @@ async def initialize_session(request: SessionInitRequest):
     except Exception as e:
         print(f"❌ Error initializing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/job-description/extract")
+async def extract_job_description(request: JobDescriptionRequest):
+    """
+    Pull the text out of an attached job description PDF.
+
+    Job descriptions arrive as PDFs far more often than as plain text, and the
+    browser cannot read one without shipping a PDF parser. Claude already
+    reads the resume this way, so the same capability serves here. The text
+    goes back to the candidate for review rather than straight into the
+    interview - they can see and correct what was read before starting.
+    """
+    pdf_base64 = (request.pdf_base64 or "").strip()
+    if not pdf_base64:
+        raise HTTPException(status_code=400, detail="No PDF supplied")
+
+    # Matches the 10 MB cap the resume upload enforces in the browser.
+    if len(pdf_base64) > 14_000_000:
+        raise HTTPException(status_code=413, detail="Job description PDF is too large")
+
+    def read_pdf() -> str:
+        client = anthropic.Anthropic(api_key=config.api.anthropic_api_key)
+        message = client.messages.create(
+            model=config.interview.claude_model,
+            max_tokens=config.interview.max_tokens,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract the job description from this PDF as plain "
+                            "text. Keep the role title, responsibilities, and "
+                            "requirements, and preserve the headings and list "
+                            "structure. Return only the extracted text - no "
+                            "preamble, no commentary, no markdown fences."
+                        ),
+                    },
+                ],
+            }],
+        )
+        return first_text(message)
+
+    try:
+        text = await asyncio.to_thread(read_pdf)
+    except Exception as e:
+        print(f"❌ Could not read job description PDF: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not read that PDF. Paste the text instead.",
+        )
+
+    text = text.strip()
+    if not text:
+        raise HTTPException(
+            status_code=422,
+            detail="No text found in that PDF. Paste the description instead.",
+        )
+
+    print(f"📄 Job description extracted ({len(text)} chars)")
+    return {"job_description": text}
 
 
 @app.post("/api/interview/start")

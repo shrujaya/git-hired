@@ -11,7 +11,13 @@ from dotenv import load_dotenv
 
 # Base paths
 BASE_DIR = Path(__file__).parent.parent
+# One logs root, always under server/. Per-session interview output goes to
+# LOGS_DIR/<session_id>/; continuous eye and input tracking goes to
+# TRACKING_DIR. Nothing writes into the source tree, and nothing is
+# CWD-relative — the paths resolve identically from the repo root,
+# server/backend, or an IDE with its own working directory.
 LOGS_DIR = BASE_DIR / "logs"
+TRACKING_DIR = LOGS_DIR / "tracking"
 REPORTS_DIR = BASE_DIR / "reports"
 PROMPTS_DIR = BASE_DIR / "prompts"
 
@@ -218,6 +224,7 @@ class SystemConfig(BaseModel):
 
     # File paths
     logs_dir: Path = LOGS_DIR
+    tracking_dir: Path = TRACKING_DIR
     reports_dir: Path = REPORTS_DIR
     prompts_dir: Path = PROMPTS_DIR
 

@@ -89,6 +89,9 @@ const InterviewPage: React.FC = () => {
   // may still want to speak before leaving.
   const [interviewComplete, setInterviewComplete] = useState(false);
   const [showEndPrompt, setShowEndPrompt] = useState(false);
+  // The interview should be fullscreen; set when the automatic request was
+  // refused for want of a user gesture.
+  const [needsFullscreen, setNeedsFullscreen] = useState(false);
 
   // Device toggles. Kept here rather than read off the avatar, so they work
   // before (and without) a live Tavus call.
@@ -759,13 +762,34 @@ const InterviewPage: React.FC = () => {
     }
   };
 
-  // Enter fullscreen on mount
+  // Fullscreen is requested on the click that leaves the role & resume page,
+  // because requestFullscreen() needs transient user activation and mounting
+  // a component is not a user gesture — the old 500ms timer here could never
+  // have worked, it just failed into a console warning.
+  //
+  // This attempt still runs, for the case where activation happens to survive
+  // the navigation. When it does not (a reload of /interview is the common
+  // one) offer a way in, rather than running the interview windowed with no
+  // affordance: the exit warning below only fires on leaving fullscreen, so a
+  // candidate who never entered would see nothing at all.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      enterFullscreen();
-    }, 500);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    (async () => {
+      await enterFullscreen();
+      if (!cancelled) setNeedsFullscreen(!document.fullscreenElement);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [enterFullscreen]);
+
+  // Clear the prompt however they get there — the button here, F11, or the
+  // browser's own control.
+  useEffect(() => {
+    const sync = () => setNeedsFullscreen(!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
 
   // Monitor fullscreen exits
   useEffect(() => {
@@ -926,6 +950,29 @@ const InterviewPage: React.FC = () => {
     <div className="h-screen w-screen overflow-hidden blueprint font-sans">
       {/* Hidden canvas for video processing */}
       <canvas ref={canvasRef} width={640} height={480} className="hidden" />
+
+      {/* Not fullscreen and never was — the automatic request was refused.
+          Shown only while the exit warning is not, so the two never stack. */}
+      {needsFullscreen && !showWarning && (
+        <div className="fixed top-5 left-0 right-0 mx-auto w-fit z-50 bg-[#131318] border border-trace/40 text-dtext px-4 py-2.5 rounded-[2px] shadow-2xl flex items-center gap-2.5 max-w-md animate-fadeup">
+          <Square className="w-4 h-4 flex-shrink-0 text-trace" />
+          <div className="flex-1">
+            <p className="font-semibold text-xs">Go fullscreen</p>
+            <p className="text-[10px] mt-0.5 text-dsub">
+              Interviews run fullscreen. Your browser needs a click to allow it.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              enterFullscreen();
+              setNeedsFullscreen(false);
+            }}
+            className="bg-trace/20 hover:bg-trace/30 text-trace px-2.5 py-1 rounded-[2px] text-[10px] font-semibold transition-colors whitespace-nowrap"
+          >
+            Enter
+          </button>
+        </div>
+      )}
 
       {/* Fullscreen warning */}
       {showWarning && (

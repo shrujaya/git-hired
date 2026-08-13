@@ -1,12 +1,42 @@
-eyetracking.py
+# ---- Secrets -----------------------------------------------------------
+# Real keys live in server/.env; server/.env.example is the shareable template.
 .env
 .env.local
 .env.*.local
+
+# ---- Python ------------------------------------------------------------
 __pycache__/
-server/files/*.pdf
-.DS_Store
-logs/
+*.py[cod]
 .venv/
 venv/
-server/src/logs/eye_tracking_log.jsonl
+
+# ---- Runtime output ----------------------------------------------------
+# Produced by running an interview, and it contains real people: resumes,
+# transcripts of what they said, and written evaluations of them. None of it
+# belongs in the repository.
+#
+# There are exactly two output roots, both under server/ (see TRACKING_DIR and
+# LOGS_DIR in server/config/settings.py):
+#   server/logs/<session_id>/   per-interview transcript, resume analysis, code
+#   server/logs/tracking/       continuous eye + input tracking
+#   server/reports/<session_id>/ generated reports (pdf/md/json)
+server/logs/
 server/reports/
+
+# Belt and braces: catch a logs/ or reports/ directory anywhere, in case a
+# script is ever run with a working directory we did not anticipate.
+logs/
+reports/
+
+# Uploaded resumes and job descriptions
+server/files/*.pdf
+server/src/*.pdf
+
+# Tracking output, wherever it lands
+*.jsonl
+
+# ---- Editors / OS ------------------------------------------------------
+.DS_Store
+
+# ---- Misc --------------------------------------------------------------
+eyetracking.py

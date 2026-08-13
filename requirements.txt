@@ -27,5 +27,9 @@ protobuf>=4.25.3,<5
 # Input tracking
 pynput>=1.7.6
 
+# Interview report PDF (emailed to the manager). Pure Python - no system
+# libraries to install, unlike weasyprint/wkhtmltopdf.
+reportlab>=4.0
+
 # Config
 python-dotenv>=1.0.0

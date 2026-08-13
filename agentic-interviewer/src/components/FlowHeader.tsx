@@ -5,6 +5,8 @@
 // redline. Purely presentational - which step is active is passed in, nothing
 // here owns state or navigation.
 
+import BrandMark from "./BrandMark";
+
 interface FlowHeaderProps {
   /** 1 = device check, 2 = role & resume, 3 = interview */
   step: 1 | 2 | 3;
@@ -15,20 +17,8 @@ const STEPS = ["Device check", "Role & resume", "Interview"] as const;
 const FlowHeader = ({ step }: FlowHeaderProps) => (
   <header className="border-b-2 border-ink bg-card">
     <div className="flex items-stretch divide-x divide-rule border-rule">
-      {/* Mark */}
-      <div className="flex items-center gap-3 pl-5 md:pl-8 pr-5 py-3.5 min-w-0">
-        <div className="w-8 h-8 border-2 border-ink flex items-center justify-center flex-shrink-0">
-          <span className="font-display font-extrabold text-[17px] leading-none text-ink">G</span>
-        </div>
-        <div className="min-w-0">
-          <div className="font-display font-extrabold text-[17px] leading-none tracking-title text-ink truncate">
-            Git Hired
-          </div>
-          <div className="font-mono text-[8.5px] tracking-[0.14em] uppercase text-inkfaint mt-1">
-            Technical interview
-          </div>
-        </div>
-      </div>
+      {/* Mark — doubles as the way back to the cover sheet */}
+      <BrandMark to="/" />
 
       {/* Stage cells — collapses to a fraction on small screens */}
       <div className="hidden md:flex flex-1 items-stretch divide-x divide-rule">

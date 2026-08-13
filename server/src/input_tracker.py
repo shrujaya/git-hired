@@ -6,11 +6,17 @@ import os
 
 
 
-#locations for all the files being saved
+# Locations for all the files being saved.
+#
+# Anchored to this file, not the working directory: the old "./server/src/logs"
+# resolved against wherever the script happened to be launched from, which
+# scattered half-full log directories across the repo (./src/logs,
+# ./server/backend/src/logs). Matches TRACKING_DIR in config/settings.py.
+from pathlib import Path
 
-log_dir = "./server/src/logs"  
-log_file_keyboard = os.path.join(log_dir, "input_log_keyboard.jsonl")
-log_file_mouse = os.path.join(log_dir, "input_log_mouse.jsonl")
+log_dir = Path(__file__).resolve().parents[1] / "logs" / "tracking"
+log_file_keyboard = os.path.join(log_dir, "input_keyboard.jsonl")
+log_file_mouse = os.path.join(log_dir, "input_mouse.jsonl")
 
 os.makedirs(log_dir, exist_ok=True)
 

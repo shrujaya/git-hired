@@ -24,34 +24,46 @@ A comprehensive, intelligent technical interview platform powered by Claude AI, 
 - **🧠 Adaptive Questioning**: Real-time difficulty adjustment based on candidate responses
 - **💻 Code Evaluation**: Logic-focused code assessment (syntax-agnostic)
 - **📊 Automated Reporting**: Comprehensive interview reports with scoring
-- **📧 Email Integration**: Automatic report delivery to hiring managers
-- **💬 Real-time Communication**: WebSocket support for live interviews
-- **🎙️ Audio/Video Ready**: Integration with LiveKit for multimedia interviews
+- **📧 Email Integration**: Reports delivered to hiring managers as a PDF
+- **💬 Real-time Communication**: WebSocket control channel for live interviews
+- **📝 Full Transcript**: Written to disk as the interview runs, not only at the end
+- **🎙️ Live Voice**: Tavus owns the microphone and turn-taking; this backend
+  supplies the interviewer's brain
 
 ### Interview Flow
 
-1. **Resume Upload Screen**
-   - Candidate uploads PDF resume
-   - Selects job role from dropdown
-   - Provides job description
+1. **Welcome** (`/`)
+   - What the interview is, what it will ask for, and how long it takes
+   - Nothing is recorded here
 
-2. **Interview Screen**
-   - AI avatar interviewer
-   - Real-time conversation
-   - Adaptive question difficulty
-   - Integrated code editor for coding questions
-   - Live video feed of candidate
+2. **Device check** (`/device-check`)
+   - Camera and microphone preview, plus a four-point readiness checklist
+   - Nothing is recorded here either
 
-3. **Automated Evaluation**
-   - Response quality assessment
-   - Code logic evaluation
-   - Comprehensive scoring
+3. **Role & resume** (`/landing`)
+   - Candidate attaches a PDF resume — the name is read off it, not typed
+   - Picks one of five roles, **or** "Something else" and pastes/attaches
+     their own job description (PDF or text)
 
-4. **Report Generation**
-   - Detailed performance analysis
-   - Technical assessment scoring
-   - Hiring recommendations
-   - Email delivery to manager
+4. **Interview** (`/interview`)
+   - Live AI avatar: it hears the candidate, decides when they have finished a
+     thought, and speaks the questions
+   - Opens fullscreen; a three-beat warm-up (greeting → introduction → first
+     question) before the questions proper
+   - Ten questions with adaptive difficulty, one of them a coding exercise with
+     hints if the candidate stalls
+   - Live transcript and a code editor beside the call
+   - Ends itself after the final question and offers to close
+
+5. **Automated evaluation**
+   - Response quality scored per answer (feeds difficulty)
+   - Code logic assessed against the candidate's own explanation
+   - Full transcript written to disk as the interview runs
+
+6. **Report** (`/results`)
+   - Technical assessment, scoring and a hiring recommendation
+   - Emailed to the manager as a **PDF** attachment (Markdown and JSON are
+     kept on disk alongside it)
 
 ## 🏗️ System Architecture
 
@@ -229,18 +241,45 @@ anywhere in the source. To run without the avatar or email features, set
 
 ### Interview Settings
 
-Edit `config/settings.py` to customize:
+These are read from `server/.env` — you do not need to edit Python to change
+them. Defaults live in `server/config/settings.py`.
 
-```python
-class InterviewConfig:
-    max_duration = 45  # minutes
-    warmup_questions = 2
-    core_questions = 5
-    advanced_questions = 3
-    question_timeout = 300  # seconds
-    coding_question_timeout = 600
-    max_coding_score = 10
+```env
+# Shape of the interview. The total is the number of questions asked;
+# one of them is the coding exercise.
+WARMUP_QUESTIONS=2
+CORE_QUESTIONS=5
+ADVANCED_QUESTIONS=3
+MAX_INTERVIEW_DURATION=45      # minutes
+
+# Coding round
+CODING_MAX_HINTS=3             # hints before the interview moves on
+CODING_MAX_PROMPTS=6           # turns spent talking before submitting anything
+
+# Latency levers for a spoken turn. A reply is 2-4 sentences; the large
+# budget is for report generation. REPLY_EFFORT is the main one.
+REPLY_MAX_TOKENS=1024
+REPLY_EFFORT=low               # low | medium | high | xhigh | max
+
+CLAUDE_MODEL=claude-sonnet-5   # the only place the model id is set
 ```
+
+### Server & feature flags
+
+```env
+HOST=127.0.0.1                 # bind address
+PORT=8100                      # see "Changing the port" above
+RELOAD=true                    # auto-restart on source change
+
+ENABLE_AVATAR=true             # false runs push-to-talk with browser TTS
+ENABLE_EMAIL_NOTIFICATIONS=true
+SAVE_TRANSCRIPTS=true
+ENABLE_LIVEKIT=true            # reported by /health; nothing reads it yet
+```
+
+`server/.env.example` is the complete, commented list — copy it to
+`server/.env` and work from there. `LIVEKIT_*` is left over from an earlier
+audio/video approach that Tavus replaced; it is not used.
 
 ### Email Settings
 
@@ -254,7 +293,13 @@ SENDER_PASSWORD=your_app_password
 MANAGER_EMAIL=hiring@company.com
 ```
 
-**Note**: For Gmail, use an [App Password](https://support.google.com/accounts/answer/185833)
+**Note**: Gmail requires a **16-character App Password** from an account with
+2-Step Verification — an ordinary account password is rejected with
+`535 5.7.8 Username and Password not accepted`. Create one at
+[myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+The server warns at startup if `SENDER_PASSWORD` is not 16 characters, and a
+failed send always prints where the report was saved — the report is written to
+disk before the email is attempted, so a rejected login never loses it.
 
 ### Avatar Settings
 
@@ -264,9 +309,17 @@ Create your Tavus avatar:
 2. Create a new **face** (upload 2-5 min video), or use one of Tavus's stock faces
 3. Copy the face id to `server/.env` as `TAVUS_FACE_ID=r...`
 
-Leave `TAVUS_PAL_ID` blank and the server provisions an echo-mode PAL on first
-use, printing its id so you can pin it (otherwise a new one is created each
-restart). List what your account has:
+Leave `TAVUS_PAL_ID` blank and the server provisions a full-pipeline PAL on
+first use — one that hears the candidate and calls this backend for its lines —
+printing its id so you can pin it (otherwise a new one is created each restart).
+
+> **After changing any turn-taking value** (`TAVUS_TURN_TAKING_PATIENCE`,
+> `TAVUS_INTERRUPTIBILITY`, `TAVUS_IDLE_ENGAGEMENT`, `TAVUS_VOICE_ISOLATION`)
+> **or `TAVUS_LLM_BASE_URL`, clear `TAVUS_PAL_ID`.** They are baked into the PAL
+> when it is created, so an existing PAL keeps the old values — including a dead
+> tunnel URL, which makes the avatar join and then sit there silently.
+
+List what your account has:
 
 ```bash
 curl -H "x-api-key: $TAVUS_API_KEY" "https://tavusapi.com/v2/faces?face_type=user"
@@ -417,27 +470,29 @@ Then set `TAVUS_LLM_BASE_URL=https://git-hired.yourdomain.com` once and pin
    ```
    Then open <http://localhost:5173>
 
-3. **Upload Resume**
-   - Enter candidate name
-   - Select job role
-   - Paste job description
-   - Upload PDF resume
+3. **Check your devices** (<http://localhost:5173>)
+   - Allow camera and microphone, confirm the four-point checklist
 
-4. **Conduct Interview**
-   - System analyzes resume (30-60 seconds)
-   - Avatar loads automatically
-   - Click "Begin Interview"
-   - Answer questions conversationally
-   - Submit code when prompted
+4. **Attach a resume and pick a role**
+   - PDF resume — the candidate's name is read off it
+   - One of the five listed roles, or "Something else" to paste or attach your
+     own job description
 
-5. **End Interview**
-   - Click "End Interview" button
-   - Report generates automatically
-   - Email sent to manager
+5. **Conduct the interview**
+   - The system analyses the resume (30-60 seconds), then the avatar joins and
+     greets the candidate — there is no "Begin" button
+   - Answer conversationally; the interviewer decides when you have finished
+   - Write the coding answer in the editor, submit it, then talk through it
 
-### API Usage
+6. **End the interview**
+   - It ends itself after the last question and offers to close, or use the
+     End button at any time
+   - The report generates in the background and is emailed as a PDF; the
+     results page does not wait on it
 
-#### Initialize Session
+## 📡 API Documentation
+
+### Initialize Session
 
 ```bash
 curl -X POST http://localhost:8100/api/session/init \
@@ -445,18 +500,36 @@ curl -X POST http://localhost:8100/api/session/init \
   -d '{
     "resume_base64": "<base64_pdf>",
     "job_description": "...",
-    "candidate_name": "John Doe",
     "job_role": "Senior Backend Engineer"
   }'
 ```
 
-#### Start Interview
+`candidate_name` is optional and only used as a fallback — the name is read off
+the resume.
+
+### Extract a job description from a PDF
+
+Used by the "Something else" role option, so a candidate can attach a job
+description instead of pasting it. Returns the text for review before it
+becomes the brief for the interview.
+
+```bash
+curl -X POST http://localhost:8100/api/job-description/extract \
+  -H "Content-Type: application/json" \
+  -d '{"pdf_base64": "<base64_pdf>"}'
+```
+
+### Start Interview
 
 ```bash
 curl -X POST "http://localhost:8100/api/interview/start?session_id=<session_id>"
 ```
 
-#### Send Message
+### Send Message
+
+Only used when the avatar is unavailable — with Tavus live, the conversation
+runs through `/v1/chat/completions` instead (see
+[Live conversation setup](#live-conversation-setup)).
 
 ```bash
 curl -X POST http://localhost:8100/api/interview/message \
@@ -467,35 +540,101 @@ curl -X POST http://localhost:8100/api/interview/message \
   }'
 ```
 
+### Submit Code
+
+Records the candidate's solution. Deliberately returns no score: the
+interviewer assesses the code against the candidate's spoken explanation on
+their next turn.
+
+```bash
+curl -X POST http://localhost:8100/api/interview/code/submit \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "<session_id>", "code": "def two_sum(nums, t): ..."}'
+```
+
+### End Interview
+
+Saves the transcript, tears down the Tavus conversation, and kicks off report
+generation in the background. Idempotent — a second call returns
+`already_ended` rather than billing another report.
+
+```bash
+curl -X POST http://localhost:8100/api/interview/end \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "<session_id>"}'
+```
+
+### Report Status
+
+Report generation is a slow Claude call, so it runs after the response above
+returns. Poll this for the outcome.
+
+```bash
+curl http://localhost:8100/api/interview/report-status/<session_id>
+```
+
+### Other endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Liveness plus the resolved feature flags |
+| `GET /` | Service banner |
+| `POST /v1/chat/completions` | OpenAI-compatible; **Tavus calls this**, not the other way round |
+| `WS /ws/{session_id}` | Control channel — pushes coding questions, hints and the end-of-interview signal to the UI |
+| `WS /ws/video` | Camera frames for face/eye tracking |
+
 ## 📁 Project Structure
 
 ```
 git-hired/
-├── agents/                            # AI Agents
-│   ├── resume_evaluator.py            # Resume analysis agent
-│   ├── interviewer.py                 # Interview conductor agent
-│   ├── code_evaluator.py              # Code assessment agent
-│   └── report_generator.py            # Report creation agent
-├── backend/
-│   └── server.py                      # FastAPI server
-├── config/
-│   └── settings.py                    # Configuration management
-├── frontend/
-│   └── index.html                     # React application
-├── prompts/
-│   └── agent_prompts.py               # All agent prompts
-├── logs/                              # Interview transcripts
-│   └── <session_id>/
-│       ├── resume_analysis.txt
-│       ├── interview_transcript.txt
-│       └── code_evaluation.txt
-├── reports/                           # Generated reports
-│   └── <session_id>/
-│       └── interview_report.md
+├── server/                            # Python backend
+│   ├── agents/                        # AI agents
+│   │   ├── resume_evaluator.py        # Resume analysis + name extraction
+│   │   ├── interviewer.py             # Interview conductor (the brain)
+│   │   ├── code_evaluator.py          # Coding assessment + hints
+│   │   ├── report_generator.py        # Report creation + email
+│   │   ├── report_pdf.py              # Markdown → PDF for the emailed report
+│   │   └── response_utils.py          # Response parsing + input sanitising
+│   ├── backend/
+│   │   └── server.py                  # FastAPI server + Tavus LLM endpoint
+│   ├── config/
+│   │   ├── settings.py                # Configuration management
+│   │   └── console.py                 # UTF-8 console bootstrap (Windows)
+│   ├── prompts/
+│   │   └── agent_prompts.py           # All agent prompts
+│   ├── logs/                          # All runtime output (gitignored)
+│   │   ├── <session_id>/              # One directory per interview
+│   │   │   ├── resume_analysis.txt
+│   │   │   ├── interview_transcript.txt · .json
+│   │   │   └── code_evaluation.txt
+│   │   └── tracking/                  # Continuous eye + input tracking
+│   │       ├── eye_tracking.jsonl
+│   │       └── input_keyboard.jsonl · input_mouse.jsonl
+│   ├── reports/                       # Generated reports (gitignored)
+│   │   └── <session_id>/
+│   │       └── interview_report_<name>_<timestamp>.pdf · .md · .json
+│   └── .env.example                   # Backend environment template
+├── agentic-interviewer/               # React + Vite frontend
+│   └── src/
+│       ├── pages/                     # Welcome · Test (device check) ·
+│       │                              # Landing · Interview · Results
+│       ├── components/                # FlowHeader · BrandMark · ProtectedRoute
+│       ├── hooks/                     # useTavusAvatar · useFullscreen
+│       ├── routes/index.tsx           # Router + route guards
+│       └── config.ts                  # Backend URL, single source of truth
+├── setup.sh · setup.ps1               # One-command install
+├── run.sh · run.ps1                   # Launchers (backend | frontend)
 ├── requirements.txt                   # Python dependencies
-├── .env.example                       # Environment template
 └── README.md                          # This file
 ```
+
+> **Where output goes.** There are exactly two roots, both under `server/` and
+> both gitignored: `server/logs/` (per-session interview data plus
+> `tracking/`) and `server/reports/`. They hold real candidate data —
+> transcripts, resumes and written evaluations — so keep them ignored. Paths
+> come from `LOGS_DIR` / `TRACKING_DIR` / `REPORTS_DIR` in
+> `server/config/settings.py` and are anchored to `server/`, never to the
+> working directory.
 
 ## 🔧 Agents
 
@@ -514,7 +653,7 @@ git-hired/
 - Recommended difficulty level
 - Warm-up topics
 
-**File**: `agents/resume_evaluator.py`
+**File**: `server/agents/resume_evaluator.py`
 
 ### 2. Interviewer Agent
 
@@ -533,7 +672,7 @@ git-hired/
 - Partially wrong (30-49%): -1 level
 - Wrong (0-29%): -2 levels
 
-**File**: `agents/interviewer.py`
+**File**: `server/agents/interviewer.py`
 
 ### 3. Code Evaluator Agent
 
@@ -547,7 +686,7 @@ git-hired/
 
 **Note**: Focuses on LOGIC, not syntax
 
-**File**: `agents/code_evaluator.py`
+**File**: `server/agents/code_evaluator.py`
 
 ### 4. Report Generator Agent
 
@@ -562,13 +701,13 @@ git-hired/
 6. Detailed Analysis
 7. Recommendations
 
-**File**: `agents/report_generator.py`
+**File**: `server/agents/report_generator.py`
 
 ## 🎨 Customization
 
 ### Modify Prompts
 
-Edit `prompts/agent_prompts.py`:
+Edit `server/prompts/agent_prompts.py`:
 
 ```python
 INTERVIEWER_AGENT_PROMPT = """
@@ -578,15 +717,29 @@ Your custom interviewer personality and instructions...
 
 ### Add Custom Job Roles
 
-Edit `frontend/index.html`, add to select options:
+Candidates can already interview for a role that is not listed: the **"Something
+else"** card on the role page lets them paste or attach their own job
+description, which is used verbatim. Nothing needs changing for that.
 
-```html
-<option value="Your Custom Role">Your Custom Role</option>
+To add a role to the list everyone sees, edit `JOB_TYPES` in
+[`agentic-interviewer/src/pages/LandingPage.tsx`](agentic-interviewer/src/pages/LandingPage.tsx):
+
+```ts
+{
+  id: "ml",
+  title: "Machine Learning Engineer",
+  description: "Train and ship models; own evaluation and inference.",
+  skills: ["Python", "PyTorch", "MLOps", "SQL"],
+  level: "Mid-Senior",
+},
 ```
+
+The `description` and `skills` are what get sent to the interviewer as the job
+description, so write them as you would a real posting.
 
 ### Adjust Scoring Weights
 
-Edit `prompts/agent_prompts.py` in Report Generator prompt:
+Edit `server/prompts/agent_prompts.py` in the Report Generator prompt:
 
 ```
 Technical Assessment: 40% (adjust as needed)
@@ -597,10 +750,10 @@ Coding: 10%
 
 ### Change Interview Duration
 
-Edit `config/settings.py`:
+Set it in `server/.env` — no code change needed:
 
-```python
-max_duration = 60  # Change from 45 to 60 minutes
+```env
+MAX_INTERVIEW_DURATION=60      # minutes
 ```
 
 ## 🐛 Troubleshooting

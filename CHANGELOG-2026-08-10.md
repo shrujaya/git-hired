@@ -11,14 +11,15 @@ The work landed in three batches:
 | **1** | Cross-platform setup, Tavus API migration, live conversation (§1–5) | Committed as [`7eca195`](https://github.com/shrujaya/git-hired/commit/7eca195) |
 | **2** | Interview-page redesign, working device controls, conversation-quality fixes (§6–7) | Committed as [`fe16b0c`](https://github.com/shrujaya/git-hired/commit/fe16b0c) |
 | **3** | Interview structure, coding-round assessment, control events (§8–§12) | Committed as [`cbc3096`](https://github.com/shrujaya/git-hired/commit/cbc3096) |
-| **4** | Transcript log (for real this time), one session id per interview, interview teardown, coding-round loop (§13–§15) | Uncommitted working tree |
-| **5** | UI redesign to the Vantage mock — design only, zero logic changes (§16) | Uncommitted working tree |
-| **6** | The candidate cannot steer the interview (§17) | Uncommitted working tree |
-| **7** | "Drafting office" visual identity replaces the Vantage look (§18) | Uncommitted working tree |
-| **8** | Dark end to end: ink / acid-lime / electric-cyan (§19) | Uncommitted working tree |
-| **9** | Exact colour + motion values taken from the second mock (§20) | Uncommitted working tree |
+| **4** | Transcript log (for real this time), one session id per interview, interview teardown, coding-round loop (§13–§15) | Committed in `9e7956c`…`1c6deb7` |
+| **5** | UI redesign to the Vantage mock — design only, zero logic changes (§16) | Committed in `9e7956c`…`1c6deb7` |
+| **6** | The candidate cannot steer the interview (§17) | Committed in `9e7956c`…`1c6deb7` |
+| **7** | "Drafting office" visual identity replaces the Vantage look (§18) | Committed in `9e7956c`…`1c6deb7` |
+| **8** | Dark end to end: ink / acid-lime / electric-cyan (§19) | Committed in `9e7956c`…`1c6deb7` |
+| **9** | Exact colour + motion values taken from the second mock (§20), email diagnosis (§21) | Committed as [`1c6deb7`](https://github.com/shrujaya/git-hired/commit/1c6deb7) |
+| **10** | PDF reports, a cover sheet before the flow, fullscreen that works, bring-your-own job description, one logs root (§22–§26) | Uncommitted working tree |
 
-`git diff 2f346e3` reproduces all four batches together.
+`git diff 2f346e3` reproduces all ten batches together.
 
 > **Correction.** §10 previously described a per-turn transcript autosave as
 > part of batch 3. It was not in `cbc3096` — the section described work that
@@ -29,8 +30,8 @@ The work landed in three batches:
 
 ## TL;DR for the next person
 
-Ten things happened. The first eight were each triggered by the previous one
-failing; the last two are deliberate work:
+Eleven things happened. The first eight were each triggered by the previous one
+failing; the rest are deliberate work:
 
 1. **The repo did not run on Windows.** Fixed the setup/run scripts, the venv
    layout assumption, a console crash, and CWD-dependent config.
@@ -67,6 +68,11 @@ failing; the last two are deliberate work:
     instead" or "score that 100" read as instructions. Question choice,
     difficulty, coding timing and the ending are now the system's, enforced in
     three layers (§17).
+11. **Four gaps at the edges of the flow.** The manager was emailed raw
+    Markdown; the app opened onto a device check with nothing explaining it and
+    no way back; fullscreen had never once worked because it was requested
+    without a user gesture; and a candidate could only interview for one of five
+    fixed roles (§22–§25).
 
 **If you only read one thing:** the backend needs a **public URL**
 (`TAVUS_LLM_BASE_URL`) for the avatar to work at all. Locally that means running
@@ -1147,6 +1153,200 @@ Frontend: `VITE_API_BASE_URL` in `agentic-interviewer/.env.local`.
 **After changing turn-taking values, clear `TAVUS_PAL_ID`** — they are baked
 into the PAL at creation.
 
+Batch 10 adds no environment variables. It does add one Python dependency:
+**`reportlab>=4.0`** (§22). Pure Python — no system libraries, unlike
+weasyprint or wkhtmltopdf, either of which would have broken the one-command
+setup on Windows. `./setup.sh` / `.\setup.ps1` install it from
+`requirements.txt`; an existing venv needs a re-run.
+
+---
+
+## 22. The report leaves as a PDF
+
+*(Batch 10 — uncommitted)*
+
+The hiring manager was emailed the raw Markdown file, which most mail clients
+show as plain text with the `##` and `**` still in it.
+
+[`server/agents/report_pdf.py`](server/agents/report_pdf.py) (new) renders the
+report the model writes: title block with candidate, position, date, duration
+and coding score, then headings, bold/italic/inline code, bullets, numbered
+lists, rules, **tables**, and a footer with page numbers. It is a deliberately
+small Markdown subset — what the report generator actually produces — and
+anything unrecognised falls through as body text rather than being dropped.
+
+`save_report` now writes `.pdf` alongside the existing `.md`/`.json` and
+returns the PDF, and the attachment goes out as **`application/pdf`**: as
+`octet-stream` it arrived as an unknown blob rather than something the client
+previews.
+
+Two things the real reports forced, found by rendering an actual one
+(`e785f44e…`) rather than a synthetic sample:
+
+- **Tables.** A real report carries ~18 table rows. A naive line-by-line
+  renderer prints raw `| a | b |` pipes into the PDF.
+- **Emoji.** The model writes `✅ HIRE` / `❌ NO HIRE`, and the core PDF fonts
+  have no emoji glyphs — those draw as black boxes. Meaningful ones map to
+  text (`[YES]`, `[NO]`, `[!]`), smart punctuation normalises, and anything the
+  font still cannot draw is dropped rather than corrupting the page.
+
+A rendering failure falls back to emailing the Markdown: the report is already
+on disk by then, and an ugly attachment beats none.
+
+---
+
+## 23. A cover sheet before the flow, and a way back to it
+
+*(Batch 10 — uncommitted)*
+
+The app opened straight onto the device check, with no page explaining what the
+interview was. [`WelcomePage.tsx`](agentic-interviewer/src/pages/WelcomePage.tsx)
+(new) is that page, built entirely from the existing drafting vocabulary — the
+same title block, `Fig. N —` annotations, display hero over a redline, and the
+two-column sheet the flow pages use. Its figures are read from config rather
+than invented: 10 questions, 1 coding exercise, 5 roles, `MAX_INTERVIEW_DURATION`
+minutes.
+
+**Routing.** Welcome takes `/`; the device check moves to `/device-check`. Both
+carry `ProtectTestPage`, and that is load-bearing: every other guard sends a
+candidate back to `/` when they are out of order, and that guard is what
+forwards them to whichever stage they had actually reached. An unguarded page
+at `/` would strand a mid-interview refresh on the cover sheet.
+
+**The mark is now a way back.** Extracted to
+[`BrandMark.tsx`](agentic-interviewer/src/components/BrandMark.tsx) because it
+had come to exist in two files, and the glyph drifting between them is the kind
+of thing nobody notices until it ships. `G` becomes `>_` per the mock, set in
+mono — it is a shell caret, not display lettering.
+
+The link needed a guard change to work at all. From sheet 2 the candidate has
+`cameraCheckCompleted`, so `/` would forward them straight back and the logo
+would look broken. The link passes `state: { home: true }` and the guard honours
+that as a deliberate request for the cover sheet. Nothing else changes: typing
+`/` directly still forwards, and going back is safe because it only moves them
+*earlier* — nothing entered is cleared, and "Begin device check" forwards them
+right back.
+
+---
+
+## 24. The interview actually opens fullscreen
+
+*(Batch 10 — uncommitted)*
+
+The interview page had `setTimeout(() => enterFullscreen(), 500)` on mount. That
+could never have worked: `requestFullscreen()` requires **transient user
+activation**, and a timer 500ms after a component mounts is not a user gesture.
+The promise rejected every time and the `catch` swallowed it into a
+`console.error`, so the feature looked implemented and never ran.
+
+Fullscreen is now requested on **the click that starts the interview**, in
+`handleProceed`. Fullscreen is document-scoped, so it carries across the
+client-side navigation into `/interview`.
+
+Placement inside that handler matters: the call sits **before** the
+`await convertPdfToBase64(...)` and `await initializeSession(...)`. Those are a
+file read and a Claude round trip that the page's own loader warns "usually
+takes under a minute" — activation is long gone by the time they resolve, so
+requesting afterwards fails exactly like the mount attempt did. It is also not
+awaited: a browser that refuses must not stop the interview from starting.
+
+A **reload of `/interview`** has no gesture available, so nothing can enter
+programmatically. That previously left the candidate windowed with no
+indication — the amber banner only fires on *exiting* fullscreen, so someone who
+never entered saw nothing. There is now a cyan prompt offering one click, which
+clears however they get there (the button, F11, or the browser's own control)
+and never stacks with the exit warning.
+
+---
+
+## 25. Bring your own job description
+
+*(Batch 10 — uncommitted)*
+
+A sixth option on the role page — **06, "Something else"** — for candidates
+interviewing for a role that is not one of the five listed. Same card
+vocabulary, dashed border, so it reads as a slot to fill rather than a role on
+offer. Selecting it opens a *Fig. 2a* panel with a role title and a description
+box that takes either route:
+
+- **Paste** straight in.
+- **Attach a file** — `.txt`/`.md` are read in the browser; a **PDF** goes to a
+  new `POST /api/job-description/extract`, which reads it with Claude exactly as
+  the resume path already does. The browser has no PDF parser, and shipping one
+  would grow a bundle already flagged as oversized (known issue 5).
+
+Either way the text lands in the box, labelled *"Read from jd.pdf · editable"*,
+so the candidate sees and can correct what was extracted **before** it becomes
+the brief for their interview.
+
+The custom description is sent through **verbatim** as `job_description` rather
+than rebuilt from the listed-role template — being more specific than a template
+is the entire point. The typed title becomes `job_role` and the `jobTitle` the
+interview room displays. Listed roles are untouched.
+
+**120 characters is a floor, not a ceiling.** A one-liner produces questions no
+better than picking a listed role while looking like it customised something.
+There is no maximum, and nothing truncates: no `maxLength` on the textarea, no
+cap on the API field.
+
+The first version displayed this as `1,224 / 120 CHARACTERS`, which reads as a
+cap being exceeded. It now says `Minimum 120 characters` below the floor and a
+plain `1,224 characters` above it. The same fix went into the hint under the
+Start button.
+
+Related: the Start button stays disabled until the **role title** is filled, and
+that requirement was originally announced only in small mono at the far
+bottom-left of the page — nowhere near the panel being filled in. Combined with
+the ratio readout it looked like the description was the problem. The field is
+now marked `Required`, and once the description is long enough but the title is
+empty a line appears directly under the input saying so.
+
+---
+
+## 26. One place for runtime output
+
+*(Batch 10 — uncommitted)*
+
+There were **four** log directories, three of them accidental:
+
+| Path | Written by | Why it existed |
+| --- | --- | --- |
+| `server/logs/<session_id>/` | `config.logs_dir` | The real one |
+| `server/src/logs/` | `server.py`, both trackers | Runtime output inside the *source* tree |
+| `./src/logs/` | the trackers | CWD-relative path, run from the repo root |
+| `./server/backend/src/logs/` | the trackers | Same path, run from `server/backend` |
+
+`eye_tracker.py` and `input_tracker.py` hard-coded `"./server/src/logs"`, which
+resolves against wherever the script was launched from — so each launch
+directory grew its own half-full copy (known issue 4).
+
+Now there are two roots, both under `server/` and both from
+[`settings.py`](server/config/settings.py): `LOGS_DIR` for per-session
+interview output and a new `TRACKING_DIR` (`server/logs/tracking/`) for the
+continuous eye and input logs. Every writer — the server and both standalone
+scripts — resolves to the same place from any working directory; the scripts
+anchor to `__file__` rather than importing config, so they stay runnable alone.
+
+Files moved rather than deleted. The two orphaned copies are kept as
+`eye_tracking.stale-from-repo-root.jsonl` and
+`eye_tracking.stale-from-backend-cwd.jsonl` — safe to delete once you have
+looked at them.
+
+### Runtime output is out of git
+
+19 generated files were tracked, including **six interview reports naming a
+real candidate**, with duration, coding score and a written hire/no-hire
+recommendation — plus transcripts, resume analyses and tracking logs. Also
+`server/src/resume.pdf`, an orphaned 391 KB resume.
+
+`.gitignore` already listed `server/reports/` and `logs/`. That never helped:
+**ignore rules do not apply to files git already tracks.** All 20 are now
+`git rm --cached`ed — removed from the index, still on disk — and `.gitignore`
+was rewritten with commented sections naming the two output roots.
+
+**This only stops it from here.** Those reports are still in history; see
+known issue 1.
+
 ---
 
 ## Files
@@ -1162,6 +1362,9 @@ into the PAL at creation.
 | [`agentic-interviewer/src/hooks/useTavusAvatar.ts`](agentic-interviewer/src/hooks/useTavusAvatar.ts) | Live avatar conversation |
 | [`agentic-interviewer/.env.example`](agentic-interviewer/.env.example) | Frontend env template |
 | [`agentic-interviewer/src/components/FlowHeader.tsx`](agentic-interviewer/src/components/FlowHeader.tsx) | Shared stepper chrome for the light flow pages (batch 5) |
+| [`server/agents/report_pdf.py`](server/agents/report_pdf.py) | Markdown → PDF for the emailed report (batch 10) |
+| [`agentic-interviewer/src/pages/WelcomePage.tsx`](agentic-interviewer/src/pages/WelcomePage.tsx) | Cover sheet at `/` (batch 10) |
+| [`agentic-interviewer/src/components/BrandMark.tsx`](agentic-interviewer/src/components/BrandMark.tsx) | The `>_` mark, optionally a link home (batch 10) |
 
 **Modified (batch 1)** — `server/backend/server.py`, `server/config/settings.py`,
 `server/agents/report_generator.py` (missing `encoding='utf-8'` on a transcript
@@ -1222,6 +1425,19 @@ palette, transcript restyled, `isEnding` loader), and
 `server/agents/interviewer.py` (background scoring, reply budget),
 `server/config/settings.py` (`REPLY_*`), `server/prompts/agent_prompts.py`
 (opening template), `README.md` (cloudflared install + tunnel health check).
+
+**Modified (batch 10)** — `server/agents/report_generator.py` (writes the PDF,
+returns it, attaches as `application/pdf`), `requirements.txt` (`reportlab`),
+`server/backend/server.py` (`POST /api/job-description/extract`,
+`JobDescriptionRequest`), `agentic-interviewer/src/pages/LandingPage.tsx`
+(+238/−… — custom role panel, fullscreen on the click),
+`agentic-interviewer/src/utils/api.utils.ts`
+(`extractJobDescriptionFromPdf`), `server/config/settings.py` (`TRACKING_DIR`),
+`server/src/eye_tracker.py` + `input_tracker.py` (anchored log paths),
+`.gitignore` (rewritten), `README.md` (project structure, flow, new endpoint), `src/routes/index.tsx` (`/` → welcome,
+`/device-check`), `src/components/ProtectedRoute.tsx` (explicit-home state),
+`src/components/FlowHeader.tsx` (uses `BrandMark`),
+`src/pages/InterviewPage.tsx` (fullscreen retry + prompt).
 
 ---
 
@@ -1344,6 +1560,43 @@ where noted.
   batch and produced a complete transcript — see Known issues 10–12 for what it
   exposed.
 
+**Batch 10:** 71 assertions — 18 unit, 53 driven through a real Chromium via
+Playwright against the dev server with the backend stubbed.
+
+- **18** PDF report: the attachment is the PDF and **not** the Markdown, content
+  type is `application/pdf`, its bytes match the file on disk, all three formats
+  are still written, emoji and smart punctuation are mapped rather than dropped,
+  and a deliberately broken renderer falls back instead of losing the report.
+  Two rendered pages were also inspected visually — that is how a ragged
+  single-cell table row was caught escaping its table.
+- **9** routing: a fresh visitor gets the welcome sheet; after the device check
+  `/` forwards to role & resume; mid-flow to the interview; when finished to
+  results; `/landing` still bounces an unprepared visitor; the CTA opens the
+  device check; no horizontal overflow at 390px.
+- **11** the mark: `>_` renders and no `G` remains, the logo returns home from
+  **both** sheets, the welcome page renders on arrival rather than bouncing,
+  the candidate's progress survives the trip, the welcome mark has no link, and
+  typing `/` directly still forwards.
+- **5** fullscreen, with `requestFullscreen` instrumented: no request before the
+  click, a request on the click, and — the load-bearing one —
+  `navigator.userActivation.isActive` **true** at the moment of the call. Plus
+  the reload case showing the prompt.
+- **17** custom role: the option appears as 06, the editor stays hidden until
+  chosen, empty and too-short descriptions are refused, the pasted text arrives
+  verbatim with the typed title as the role, an attached PDF fills the box via
+  the endpoint, a text file is read without the backend, and **listed roles are
+  unaffected**.
+- **11** the character-count fix: the minimum is stated rather than ratioed, no
+  `X / 120` remains anywhere, a long description reports a plain count, the
+  missing-title note appears and clears, and the full 1,224 characters reach the
+  API.
+- `tsc --noEmit` clean; production build passes; backend imports.
+
+**Not verified in batch 10:** the JD extraction endpoint against a real PDF and
+a live Anthropic key — it was stubbed at the network boundary in every test, so
+the prompt and the 502/422 paths are unexercised. The rendered welcome sheet and
+custom-role panel were screenshotted, not clicked through by a human.
+
 **Not verified in any batch:** the live in-browser call — it needs a real
 microphone, camera permissions, and a running tunnel. In particular the
 **transcript field names are unconfirmed** (§7), and the §8 end-prompt dialog
@@ -1358,19 +1611,20 @@ plumbing.
 
 ## Known issues / follow-ups
 
-1. **`server/src/logs/eye_tracking_log.jsonl` is tracked in git** and has now
-   been *committed* with ~160 lines of runtime test data (96 in `7eca195`, ~63
-   more uncommitted). It is generated output: `.gitignore` it and
-   `git rm --cached` it. Every test run dirties the working tree until then.
+1. ~~**`server/src/logs/eye_tracking_log.jsonl` is tracked in git.**~~
+   **Fixed in batch 10** (§26). 20 files of runtime output were untracked —
+   including six interview reports naming a real candidate. They remain in
+   *history*: `git log -- server/reports/` still shows them, so scrubbing with
+   `git filter-repo` is a separate decision if this repo is ever public.
 2. **`server/.env` contains live secrets.** It is correctly gitignored, but the
    Anthropic and Tavus keys in it have been visible in a working session — rotate
    if that concerns you. `server/.env.example` is the shareable template.
 3. **Tunnel hostname churn** — a free Cloudflare account gives a *named* tunnel
    with a fixed hostname, which removes the clear-`TAVUS_PAL_ID` dance. Worth
    doing if iterating often.
-4. **`server/src/eye_tracker.py` / `input_tracker.py`** still have CWD-relative
-   log paths and `open()` without `encoding`. They are standalone scripts not
-   imported by the server, so they were left alone.
+4. ~~**`server/src/eye_tracker.py` / `input_tracker.py` have CWD-relative log
+   paths.**~~ Paths **fixed in batch 10** (§26). They still call `open()`
+   without `encoding`, which would break on Windows with non-ASCII content.
 5. **Bundle size** — `@daily-co/daily-js` pushes the JS bundle past 500 kB
    (598 kB / 178 kB gzipped as of batch 5). Consider `manualChunks` or a
    dynamic import if it matters.
@@ -1436,6 +1690,31 @@ exposed these. Fix 10 first; it is one line and it unblocks reports.
 18. **The device-check checklist is not persisted.** Refreshing the page clears
     all four confirmations. `sessionStorage` would fix it, in keeping with how
     the rest of the flow already stores state.
+
+### Raised by batch 10
+
+19. **`/api/job-description/extract` spends a Claude call per attached PDF**, at
+    `max_tokens: 8192`, on a page that previously made none. Small next to the
+    interview itself, but it is unauthenticated and reachable by anyone who can
+    reach the backend — worth a rate limit before this is exposed publicly.
+20. **Fullscreen cannot be automatic on Safari.** macOS Safari is stricter about
+    programmatic fullscreen across a route change, and iOS Safari has no element
+    fullscreen at all. Those candidates land on the one-click prompt (§24)
+    rather than entering automatically — which is why the prompt exists, rather
+    than being belt-and-braces.
+21. **The welcome sheet reflows on mobile, but the interview room does not.**
+    Known issue 8 makes the room desktop-only; a cover page that looks fine on a
+    phone now invites candidates onto a device that cannot answer a coding
+    question. Either fix 8 or say "desktop only" on the cover.
+22. **PDF reports cannot render emoji.** The core PDF fonts have no glyphs for
+    them, so `✅`/`❌`/`⚠️` map to `[YES]`/`[NO]`/`[!]` and anything else outside
+    Latin-1 is dropped. Embedding a Unicode TTF would fix the general case;
+    colour emoji would still need a colour font.
+23. **The role page is doing too much.** `LandingPage.tsx` now owns resume
+    upload, five role cards, the custom-role editor, PDF extraction and the
+    fullscreen request (+238 lines in batch 10). The custom-role panel is a
+    self-contained component waiting to be extracted; it was left inline to
+    keep this batch's diff readable.
 
 ---
 

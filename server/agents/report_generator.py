@@ -20,6 +20,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from config.settings import config
 from prompts.agent_prompts import get_report_generator_prompt
 from agents.response_utils import first_text
+from agents.report_pdf import render_report_pdf
 
 
 class ReportGeneratorAgent:
@@ -158,9 +159,23 @@ class ReportGeneratorAgent:
             f.write("---\n\n")
             f.write(report_data['report'])
         
+        # PDF — this is what the manager is emailed. A Markdown attachment
+        # opens as raw text in most mail clients.
+        pdf_file = reports_dir / f"interview_report_{candidate_name_safe}_{timestamp}.pdf"
+        try:
+            render_report_pdf(report_data, pdf_file)
+            print(f"📁 Report saved to: {pdf_file}")
+        except Exception as e:
+            # The Markdown and JSON are already on disk, so a rendering
+            # problem must not lose the report - fall back to emailing the
+            # Markdown rather than sending nothing.
+            print(f"⚠️  PDF rendering failed ({type(e).__name__}: {e}); "
+                  f"falling back to Markdown")
+            pdf_file = None
+
         print(f"📁 Report saved to: {report_file}")
-        
-        return report_file
+
+        return pdf_file or report_file
     
     def send_email(
         self,
@@ -225,9 +240,12 @@ AI Interview System
             
             msg.attach(MIMEText(body, 'plain'))
             
-            # Attach report file
+            # Attach report file. The subtype matters: sent as
+            # octet-stream a PDF arrives as an unknown blob rather than
+            # something the client will preview inline.
+            subtype = 'pdf' if report_file.suffix.lower() == '.pdf' else 'octet-stream'
             with open(report_file, 'rb') as f:
-                part = MIMEBase('application', 'octet-stream')
+                part = MIMEBase('application', subtype)
                 part.set_payload(f.read())
                 encoders.encode_base64(part)
                 part.add_header(
