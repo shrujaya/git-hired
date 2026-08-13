@@ -42,6 +42,7 @@ import time
 from agents.resume_evaluator import ResumeEvaluatorAgent
 from agents.interviewer import InterviewerAgent
 from agents.report_generator import ReportGeneratorAgent
+from agents.response_utils import sanitize_candidate_speech
 
 # Import config
 from config.settings import config, validate_config
@@ -526,8 +527,20 @@ SESSION_MARKER = "git-hired-session:"
 
 
 def _extract_session_id(messages: list) -> Optional[str]:
-    """Recover our session id from the marker Tavus echoes back."""
+    """
+    Recover our session id from the marker Tavus echoes back.
+
+    Only non-user messages are searched. The marker rides in
+    `conversational_context`, which Tavus replays as the system message, so a
+    user-role message carrying one did not come from us - it came out of the
+    candidate's microphone. Reading it would let anyone who says the marker and
+    a uuid aloud address somebody else's interview: their turn would be
+    answered by that session's agent, and their words would land in that
+    candidate's transcript.
+    """
     for message in messages:
+        if message.get("role") == "user":
+            continue
         content = message.get("content")
         if not isinstance(content, str) or SESSION_MARKER not in content:
             continue
@@ -541,11 +554,22 @@ def _extract_session_id(messages: list) -> Optional[str]:
 
 
 def _latest_candidate_message(messages: list) -> str:
+    """
+    The candidate's most recent turn, cleaned.
+
+    Sanitised here rather than deeper in because a turn that is *only* Tavus
+    markup - an audio-analysis block, or its placeholder for silence - comes
+    back empty, and empty is already handled: the caller holds the floor
+    without consuming a question. Before this, "[the user did not respond]"
+    was passed on as if the candidate had said it, and was scored.
+    """
     for message in reversed(messages):
         if message.get("role") == "user":
             content = message.get("content")
             if isinstance(content, str) and content.strip():
-                return content.strip()
+                cleaned = sanitize_candidate_speech(content)
+                if cleaned:
+                    return cleaned
     return ""
 
 
