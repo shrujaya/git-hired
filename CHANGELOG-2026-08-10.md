@@ -1091,7 +1091,37 @@ screenshot, not by the build — nothing errors.
 
 ---
 
-## New environment variables
+## 21. Email: diagnosing a silent failure
+
+*(Batch 9 — uncommitted.)*
+
+**Reported:** reports not arriving by email. **Cause: credentials, not code.**
+Gmail rejects the login with `535 5.7.8 Username and Password not accepted`,
+because `SENDER_PASSWORD` in `server/.env` is a **13-character** string.
+Gmail stopped accepting account passwords over SMTP in 2022 and requires a
+**16-character App Password** issued against an account with 2-Step
+Verification enabled. Fix: generate one at
+https://myaccount.google.com/apppasswords and replace `SENDER_PASSWORD`.
+
+Everything upstream was working — every recent session directory contains a
+finished `interview_report.md`. The pipeline reached the send and failed only
+there.
+
+Two changes so this cannot fail quietly again:
+
+- **`validate_config` now checks the password.** Missing is an error; a Gmail
+  password that is not 16 characters is a **startup warning** naming the exact
+  cause and the URL to fix it. It deliberately does not block startup — email
+  is not required to run an interview.
+- **`send_email` handles `SMTPAuthenticationError` separately**, printing the
+  server's own rejection, the App Password requirement, and *where the report
+  was saved*. The generic handler now also names the exception type and the
+  saved path. Previously both printed one line with no indication that the
+  report survived.
+
+Verified by running the real SMTP handshake against the live config: connect
+and STARTTLS succeed, login returns 535, and the new message renders. All five
+test suites still pass (138 assertions).
 
 All in [`server/.env.example`](server/.env.example).
 

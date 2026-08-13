@@ -252,7 +252,8 @@ def load_config() -> SystemConfig:
 def validate_config(cfg: SystemConfig) -> bool:
     """Validate that all required configuration is present"""
     errors = []
-    
+    warnings = []
+
     if not cfg.api.anthropic_api_key:
         errors.append("ANTHROPIC_API_KEY is required")
     
@@ -282,13 +283,36 @@ def validate_config(cfg: SystemConfig) -> bool:
             errors.append("SENDER_EMAIL is required for email notifications")
         if not cfg.email.manager_email:
             errors.append("MANAGER_EMAIL is required for email notifications")
-    
+        if not cfg.email.sender_password:
+            errors.append("SENDER_PASSWORD is required for email notifications")
+        elif "gmail" in cfg.email.smtp_server.lower():
+            # Gmail has not accepted account passwords over SMTP since 2022;
+            # it requires a 16-character App Password issued against an account
+            # with 2-Step Verification on. Anything else fails at login with
+            # "535 Username and Password not accepted" *after* the report has
+            # been written, so the interview looks fine and the email silently
+            # never arrives. Warn at startup instead of at the end of a call.
+            stripped = cfg.email.sender_password.replace(" ", "")
+            if len(stripped) != 16:
+                warnings.append(
+                    f"SENDER_PASSWORD is {len(stripped)} characters; Gmail App "
+                    "Passwords are 16. A normal account password will be "
+                    "rejected with 'BadCredentials' and no report will be "
+                    "emailed. Create one at "
+                    "https://myaccount.google.com/apppasswords"
+                )
+
+    if warnings:
+        print("Configuration Warnings:")
+        for warning in warnings:
+            print(f"  ! {warning}")
+
     if errors:
         print("Configuration Errors:")
         for error in errors:
             print(f"  - {error}")
         return False
-    
+
     return True
 
 

@@ -244,9 +244,25 @@ AI Interview System
             
             print("✅ Email sent successfully!")
             return True
-            
+
+        except smtplib.SMTPAuthenticationError as e:
+            # By far the most common failure, and the least self-explanatory:
+            # the report has already been written by this point, so without
+            # naming the cause it looks like the interview simply produced no
+            # email. Gmail stopped accepting account passwords over SMTP in
+            # 2022 and requires a 16-character App Password.
+            print(f"❌ Email rejected by {config.email.smtp_server}: {e.smtp_code} "
+                  f"{e.smtp_error.decode(errors='replace').strip()}")
+            if "gmail" in config.email.smtp_server.lower():
+                print("   Gmail needs a 16-character App Password (2-Step "
+                      "Verification must be on), not the account password.")
+                print("   Create one: https://myaccount.google.com/apppasswords")
+            print(f"   The report is still saved: {report_file}")
+            return False
+
         except Exception as e:
-            print(f"❌ Failed to send email: {e}")
+            print(f"❌ Failed to send email: {type(e).__name__}: {e}")
+            print(f"   The report is still saved: {report_file}")
             return False
     
     def generate_and_send_report(
