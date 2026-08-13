@@ -8,3 +8,4 @@ server/files/*.pdf
 logs/
 .venv/
 venv/
+server/src/logs/eye_tracking_log.jsonl
