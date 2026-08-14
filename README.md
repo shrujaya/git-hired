@@ -1,5 +1,8 @@
 # 🤖 Git-Hired
 
+> 🏆 **1st place, Entrepreneurship category** — Claude Builder Club Hackathon,
+> November 2025
+
 An AI technical interviewer that actually holds a conversation. A candidate
 uploads a résumé, picks a role, and talks to a live video avatar for ~45
 minutes. It asks ten questions, adapts the difficulty to how the answers are
